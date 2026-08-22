@@ -82,17 +82,19 @@ export function Shell({
     setMenuOpen(false);
   }
 
-  // Dismiss the account menu on outside click / Escape.
+  // Dismiss the account menu on outside tap / Escape. pointerdown covers
+  // touch screens too — mobile browsers often skip mousedown for taps
+  // outside interactive elements, which used to leave the menu stuck open.
   useEffect(() => {
     if (!menuOpen) return;
-    const onClick = (e: MouseEvent) => {
+    const onPointer = (e: PointerEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
     };
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setMenuOpen(false);
-    document.addEventListener("mousedown", onClick);
+    document.addEventListener("pointerdown", onPointer);
     document.addEventListener("keydown", onKey);
     return () => {
-      document.removeEventListener("mousedown", onClick);
+      document.removeEventListener("pointerdown", onPointer);
       document.removeEventListener("keydown", onKey);
     };
   }, [menuOpen]);
