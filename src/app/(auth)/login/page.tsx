@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { GraduationCap, Landmark, ShieldCheck } from "lucide-react";
 import { Alert } from "@/components/ui/alert";
 import { getSessionUser } from "@/lib/auth/session";
 import { LoginForm } from "./login-form";
@@ -88,24 +87,10 @@ export default async function LoginPage({
             Manage accreditation, activities, deadlines, monitoring and records for LSPU student
             organizations in a single connected system.
           </p>
-          <ul className="mt-8 space-y-3 text-sm text-sidebar-text-secondary">
-            {[
-              { icon: Landmark, text: "Organization profiles, hierarchy and adviser assignments" },
-              { icon: ShieldCheck, text: "Role-based access for OSAS, SOA, deans, advisers and officers" },
-              { icon: GraduationCap, text: "Recognition lifecycle with full historical records" },
-            ].map(({ icon: Icon, text }) => (
-              <li key={text} className="flex items-center gap-3">
-                <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-white/10">
-                  <Icon className="size-4 text-gold" aria-hidden />
-                </span>
-                {text}
-              </li>
-            ))}
-          </ul>
         </div>
 
         <p className="relative text-xs text-sidebar-text-muted">
-          Laguna State Polytechnic University · Student Organization Management System
+          Laguna State Polytechnic University · All Rights Reserved
         </p>
       </div>
 

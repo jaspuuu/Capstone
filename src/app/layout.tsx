@@ -18,7 +18,7 @@ export const metadata: Metadata = {
     template: "%s | ORGanIZE",
   },
   description:
-    "Student Organization Management System of the Laguna State Polytechnic University Office of Student Affairs and Services.",
+    "Official system of the Laguna State Polytechnic University Office of Student Affairs and Services. All rights reserved.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
