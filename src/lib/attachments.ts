@@ -1,14 +1,25 @@
 import { createHash, randomBytes } from "node:crypto";
-import { mkdir, unlink, writeFile } from "node:fs/promises";
+import { mkdir, unlink, writeFile, readFile } from "node:fs/promises";
 import path from "node:path";
+import { put, del, head } from "@vercel/blob";
 
 /**
- * Attachment storage. Files live on disk under STORAGE_DIR (never web-served
- * directly); the database keeps metadata and downloads go through an
- * authenticated route handler.
+ * Attachment storage. Files live under an unguessable random name; the
+ * database keeps metadata and downloads go through an authenticated route
+ * handler that streams bytes per request.
+ *
+ * Two drivers behind one interface:
+ * - local disk (STORAGE_DIR) during development / on a VM;
+ * - Vercel Blob in production, selected automatically whenever a
+ *   BLOB_READ_WRITE_TOKEN is present (serverless disks are ephemeral).
+ *   Blob objects are access-public but carry the same unguessable-random-
+ *   name guarantee as local storage, and all in-app reads still go through
+ *   the permission-checked download route.
  *
  * Configurable policy: allowed MIME types and size cap.
  */
+const BLOB_ENABLED = Boolean(process.env.BLOB_READ_WRITE_TOKEN);
+
 export const STORAGE_DIR =
   process.env.ATTACHMENT_STORAGE_DIR ?? path.join(process.cwd(), "storage", "uploads");
 
@@ -79,15 +90,46 @@ export function newStoredName(mimeType: string): string {
 }
 
 export async function saveAttachmentFile(storedName: string, bytes: Buffer): Promise<void> {
+  if (BLOB_ENABLED) {
+    await put(storedName, bytes, { access: "public", addRandomSuffix: false });
+    return;
+  }
   await mkdir(STORAGE_DIR, { recursive: true });
   await writeFile(path.join(/* turbopackIgnore: true */ STORAGE_DIR, storedName), bytes);
 }
 
 export async function deleteAttachmentFile(storedName: string): Promise<void> {
+  if (BLOB_ENABLED) {
+    try {
+      await del(storedName);
+    } catch {
+      // Already gone — deleting the row is still the correct outcome.
+    }
+    return;
+  }
   try {
     await unlink(path.join(/* turbopackIgnore: true */ STORAGE_DIR, storedName));
   } catch {
     // Already gone — deleting the row is still the correct outcome.
+  }
+}
+
+/** Loads the raw bytes for the download route; null when the file is gone. */
+export async function readAttachmentFile(storedName: string): Promise<Buffer | null> {
+  if (BLOB_ENABLED) {
+    try {
+      const meta = await head(storedName);
+      const res = await fetch(meta.downloadUrl);
+      if (!res.ok) return null;
+      return Buffer.from(await res.arrayBuffer());
+    } catch {
+      return null;
+    }
+  }
+  try {
+    return await readFile(path.join(/* turbopackIgnore: true */ STORAGE_DIR, storedName));
+  } catch {
+    return null;
   }
 }
 

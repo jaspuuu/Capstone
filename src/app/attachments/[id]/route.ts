@@ -1,9 +1,7 @@
-import { readFile } from "node:fs/promises";
-import path from "node:path";
 import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth/session";
 import { db } from "@/lib/db";
-import { STORAGE_DIR, safeDownloadName } from "@/lib/attachments";
+import { readAttachmentFile, safeDownloadName } from "@/lib/attachments";
 import { canViewAttachments, loadAttachableParent } from "@/lib/attachment-access";
 
 /**
@@ -29,12 +27,8 @@ export async function GET(
   const allowed = await canViewAttachments(user, parent.organizationId, parent.organization.collegeId);
   if (!allowed) return new NextResponse("Not found", { status: 404 });
 
-  let bytes: Buffer;
-  try {
-    bytes = await readFile(path.join(STORAGE_DIR, attachment.storedName));
-  } catch {
-    return new NextResponse("File missing", { status: 410 });
-  }
+  const bytes = await readAttachmentFile(attachment.storedName);
+  if (!bytes) return new NextResponse("File missing", { status: 410 });
 
   return new NextResponse(new Uint8Array(bytes), {
     headers: {
