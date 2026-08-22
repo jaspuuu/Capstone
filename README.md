@@ -170,10 +170,20 @@ status, downloadable files per slot, accomplishment-report evidence links,
 untagged supporting documents with re-tagging, and a scoped upload panel.
 Access mirrors attachment rules: admins campus-wide, deans in-college,
 advisers and members on their own organizations.
-
 SF-005 ships as the exact replica of the official blank form — its 1×1
 picture boxes are intentionally empty, matching the paper workflow where
 members paste physical photos. There are no open follow-ups.
+
+- **Authentication options** — email + password (seeded demo accounts remain
+  functional), public self-service sign-up at `/signup` (always creates the
+  least-privilege MEMBER role; privileged roles are admin-granted only), and
+  Google sign-in via `/api/auth/google/start`. First-time Google users are
+  auto-provisioned as MEMBERs with an unguessable random password hash.
+  Google requires two environment variables — `GOOGLE_CLIENT_ID` and
+  `GOOGLE_CLIENT_SECRET` from a Google Cloud OAuth client whose authorized
+  redirect URI is `<origin>/api/auth/google/callback`; without them the
+  button shows a clear "not configured" notice instead of failing.
+
 Note: `npm run build` needs a raised Node heap (`NODE_OPTIONS` set in the
 build script); avoid running builds while `next dev` is live — they share
 `.next`.
