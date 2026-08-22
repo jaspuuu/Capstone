@@ -125,10 +125,14 @@ export function SfSig({
 export function SfApprovers({
   coordinatorSig,
   directorSig,
+  spaced = false,
 }: {
   coordinatorSig?: SignatureInfo | null;
   directorSig?: SignatureInfo | null;
+  /** Official spacing varies between forms: some read "Approved / Disapproved:". */
+  spaced?: boolean;
 } = {}) {
+  const approvedLabel = spaced ? "Approved / Disapproved:" : "Approved/Disapproved:";
   return (
     <>
       <div className="mt-8 text-center">
@@ -139,7 +143,7 @@ export function SfApprovers({
       </div>
 
       <div className="mt-8 text-center">
-        <p className="font-bold">Approved/Disapproved:</p>
+        <p className="font-bold">{approvedLabel}</p>
         {directorSig ? <SignatureMark sig={directorSig} /> : null}
         <p className="mt-8 font-bold underline">ALBERTO B. CASTILLO, EdD</p>
         <p>Director/Chairperson, Office of Student Affairs and Services</p>

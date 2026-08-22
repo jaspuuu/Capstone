@@ -95,11 +95,12 @@ export default async function Sf005Page({
           <Editable initial={orgDisplay} minWidth="80mm" ariaLabel="Name of Organization" />
         </p>
 
-        {/* Member cards — 4 per row like the original grid */}
-        <div className="mt-4 grid grid-cols-4 gap-x-3 gap-y-5">
+        {/* Sample-format label from the official form, then one card per member */}
+        <p className="mt-4 font-bold">SAMPLE FORMAT:</p>
+        <div className="mt-2 grid grid-cols-4 gap-x-3 gap-y-5">
           {org.members.map((m, i) => (
             <div key={i} className="text-center">
-              <div className="mx-auto flex h-[30mm] w-[25mm] items-center justify-center border border-black text-center text-[9pt] leading-tight text-black">
+              <div className="mx-auto flex h-[24mm] w-[28mm] items-center justify-center border border-black text-center text-[9pt] leading-tight text-black">
                 1 x 1
                 <br />
                 PICTURE
@@ -168,6 +169,7 @@ export default async function Sf005Page({
         <SfApprovers
           coordinatorSig={approverSigs.coordinator}
           directorSig={approverSigs.director}
+          spaced
         />
         <SfFooter code="LSPU-OSAS-SF-005" />
       </div>

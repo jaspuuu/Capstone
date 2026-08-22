@@ -183,6 +183,7 @@ export default async function Sf003Page({
         <SfApprovers
           coordinatorSig={approverSigs.coordinator}
           directorSig={approverSigs.director}
+          spaced
         />
         <SfFooter code="LSPU-OSAS-SF-003" />
       </div>
