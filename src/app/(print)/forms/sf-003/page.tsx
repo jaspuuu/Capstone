@@ -5,8 +5,16 @@ import { requireUser } from "@/lib/auth/guards";
 import { currentAcademicYear } from "@/lib/utils";
 import { canUseOrgForm } from "@/lib/forms-access";
 import { Editable, PrintToolbar } from "@/components/forms/editable";
-import { SfApprovers, SfDateBlank, SfFooter, SfLetterhead } from "@/components/forms/sf-chrome";
+import {
+  SfApprovers,
+  SfDateBlank,
+  SfFooter,
+  SfLetterhead,
+  SfSig,
+  SignatureMark,
+} from "@/components/forms/sf-chrome";
 import { FormOrgPicker } from "@/components/forms/org-picker";
+import { getApproversSignatures, getSignaturesFor, hasSignature } from "@/lib/signatures";
 
 export const metadata: Metadata = { title: "SF-003 · Organization Adviser Commitment Form" };
 
@@ -32,12 +40,13 @@ export default async function Sf003Page({
       name: true,
       acronym: true,
       collegeId: true,
-      college: { select: { name: true, dean: { select: { firstName: true, lastName: true } } } },
+      college: { select: { name: true, dean: { select: { id: true, firstName: true, lastName: true } } } },
       advisers: {
         where: { isCurrent: true, academicYear: ay },
         select: {
           adviser: {
             select: {
+              id: true,
               firstName: true,
               lastName: true,
               middleName: true,
@@ -67,6 +76,12 @@ export default async function Sf003Page({
   const dean = org.college.dean;
   const orgDisplay = org.acronym ? `${org.name} (${org.acronym})` : org.name;
   const [ayStart, ayEnd] = ay.split("-");
+  const [sigMap, approverSigs] = await Promise.all([
+    getSignaturesFor([primary?.adviser.id, dean?.id]),
+    getApproversSignatures(),
+  ]);
+  const primarySig = primary ? sigMap.get(primary.adviser.id) ?? null : null;
+  const deanSig = dean ? sigMap.get(dean.id) ?? null : null;
 
   return (
     <>
@@ -116,7 +131,9 @@ export default async function Sf003Page({
             <Editable initial={adviserName} minWidth="55mm" ariaLabel="Adviser name" />
           </p>
           <p>
-            Signature: <Editable initial="" minWidth="52mm" ariaLabel="Adviser signature" />
+            Signature:{" "}
+            {hasSignature(primarySig) && <SignatureMark sig={primarySig!} inline />}
+            <Editable initial="" minWidth="52mm" ariaLabel="Adviser signature" />
           </p>
           <p>
             College:{" "}
@@ -152,12 +169,21 @@ export default async function Sf003Page({
         </div>
 
         <p className="mt-8 font-bold">Noted:</p>
-        <div className="mt-6 w-fit">
-          <Editable initial={dean ? `${dean.firstName} ${dean.lastName}` : ""} minWidth="60mm" ariaLabel="Dean signature" />
-          <p className="mt-0.5">Dean/Assoc. Dean of College</p>
+        <div className="mt-6">
+          <SfSig
+            name={dean ? `${dean.firstName} ${dean.lastName}` : ""}
+            caption="Dean/Assoc. Dean of College"
+            width="60mm"
+            center={false}
+            sig={deanSig}
+            ariaLabel="Dean signature"
+          />
         </div>
 
-        <SfApprovers />
+        <SfApprovers
+          coordinatorSig={approverSigs.coordinator}
+          directorSig={approverSigs.director}
+        />
         <SfFooter code="LSPU-OSAS-SF-003" />
       </div>
     </>

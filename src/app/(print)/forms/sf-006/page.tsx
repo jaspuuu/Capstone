@@ -4,8 +4,15 @@ import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth/guards";
 import { canUseOrgForm } from "@/lib/forms-access";
 import { Editable, PrintToolbar } from "@/components/forms/editable";
-import { SfDateBlank, SfFooter, SfLetterhead } from "@/components/forms/sf-chrome";
+import {
+  SfDateBlank,
+  SfFooter,
+  SfLetterhead,
+  SfSig,
+  SignatureMark,
+} from "@/components/forms/sf-chrome";
 import { FormOrgPicker } from "@/components/forms/org-picker";
+import { getApproversSignatures, getSignaturesFor } from "@/lib/signatures";
 
 export const metadata: Metadata = { title: "SF-006 · Certification" };
 
@@ -33,12 +40,14 @@ export default async function Sf006Page({
       college: {
         select: {
           name: true,
-          dean: { select: { firstName: true, lastName: true } },
+          dean: { select: { id: true, firstName: true, lastName: true } },
         },
       },
       advisers: {
         where: { isCurrent: true },
-        select: { adviser: { select: { firstName: true, lastName: true, middleName: true } } },
+        select: {
+          adviser: { select: { id: true, firstName: true, lastName: true, middleName: true } },
+        },
       },
       members: {
         where: { isCurrent: true },
@@ -66,6 +75,10 @@ export default async function Sf006Page({
     member?.position === "PRESIDENT" ? "President" : member?.position === "SECRETARY" ? "Secretary" : "";
   const dean = org.college.dean;
   const orgDisplay = org.acronym ? `${org.name} (${org.acronym})` : org.name;
+  const [sigMap, approverSigs] = await Promise.all([
+    getSignaturesFor([...org.advisers.map((a) => a.adviser.id), dean?.id]),
+    getApproversSignatures(),
+  ]);
 
   return (
     <>
@@ -103,27 +116,44 @@ export default async function Sf006Page({
         <div className="mt-10 space-y-10">
           {org.advisers.length > 0 ? (
             org.advisers.map((a, i) => (
-              <div key={i} className="w-fit">
-                <Editable initial={`${a.adviser.firstName}${a.adviser.middleName ? ` ${a.adviser.middleName}` : ""} ${a.adviser.lastName}`} minWidth="60mm" ariaLabel={`Adviser signature ${i + 1}`} />
-                <p className="mt-0.5">Organization Adviser(s)</p>
-              </div>
+              <SfSig
+                key={i}
+                name={`${a.adviser.firstName}${a.adviser.middleName ? ` ${a.adviser.middleName}` : ""} ${a.adviser.lastName}`}
+                caption="Organization Adviser(s)"
+                width="60mm"
+                center={false}
+                sig={sigMap.get(a.adviser.id)}
+                ariaLabel={`Adviser signature ${i + 1}`}
+              />
             ))
           ) : (
-            <div className="w-fit">
-              <Editable initial="" minWidth="60mm" ariaLabel="Adviser signature" />
-              <p className="mt-0.5">Organization Adviser(s)</p>
-            </div>
+            <SfSig
+              name=""
+              caption="Organization Adviser(s)"
+              width="60mm"
+              center={false}
+              ariaLabel="Adviser signature"
+            />
           )}
 
-          <div className="w-fit">
-            <Editable initial={dean ? `${dean.firstName} ${dean.lastName}` : ""} minWidth="60mm" ariaLabel="Dean signature" />
-            <p className="mt-0.5">Dean/Assoc. Dean of College</p>
-          </div>
+          <SfSig
+            name={dean ? `${dean.firstName} ${dean.lastName}` : ""}
+            caption="Dean/Assoc. Dean of College"
+            width="60mm"
+            center={false}
+            sig={dean ? sigMap.get(dean.id) : null}
+            ariaLabel="Dean signature"
+          />
         </div>
 
         <p className="mt-10 font-bold">Noted:</p>
 
         <div className="mt-16 text-center">
+          {approverSigs.director && (
+            <div className="mb-1">
+              <SignatureMark sig={approverSigs.director} />
+            </div>
+          )}
           <p className="font-bold underline">ALBERTO B. CASTILLO, EdD</p>
           <p>Director/Chairperson, Office of Student Affairs and Services</p>
         </div>

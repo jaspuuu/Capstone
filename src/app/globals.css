@@ -83,6 +83,13 @@ body {
   font-display: swap;
 }
 
+/* Handwriting font for typed e-signatures on the SF forms. */
+@font-face {
+  font-family: "Great Vibes";
+  src: url("/fonts/GreatVibes-Regular.ttf") format("truetype");
+  font-display: swap;
+}
+
 @page {
   size: A4 portrait;
   margin: 0;

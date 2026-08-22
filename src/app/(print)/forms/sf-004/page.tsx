@@ -6,6 +6,7 @@ import { can } from "@/lib/auth/rbac";
 import { currentAcademicYear, formatMoney } from "@/lib/utils";
 import { PrintToolbar } from "@/components/forms/editable";
 import { Sf004Sheets, type Sf004Activity } from "@/components/forms/sf004-sheets";
+import { getApproversSignatures, getSignaturesFor } from "@/lib/signatures";
 
 export const metadata: Metadata = { title: "SF-004 · Plan of Activities" };
 
@@ -36,14 +37,14 @@ export default async function Sf004Page({
       name: true,
       acronym: true,
       collegeId: true,
-      college: { select: { name: true, dean: { select: { firstName: true, lastName: true, positionTitle: true } } } },
+      college: { select: { name: true, dean: { select: { id: true, firstName: true, lastName: true, positionTitle: true } } } },
       members: {
         where: { isCurrent: true, academicYear: ay },
-        select: { position: true, user: { select: { firstName: true, lastName: true, middleName: true } } },
+        select: { position: true, user: { select: { id: true, firstName: true, lastName: true, middleName: true } } },
       },
       advisers: {
         where: { isCurrent: true, academicYear: ay },
-        select: { adviser: { select: { firstName: true, lastName: true, middleName: true } } },
+        select: { adviser: { select: { id: true, firstName: true, lastName: true, middleName: true } } },
       },
     },
   });
@@ -73,6 +74,15 @@ export default async function Sf004Page({
   const secretary = org.members.find((m) => m.position === "SECRETARY")?.user;
   const dean = org.college.dean;
   const [ayStart, ayEnd] = ay.split("-");
+  const [sigMap, approverSigs] = await Promise.all([
+    getSignaturesFor([
+      president?.id,
+      secretary?.id,
+      ...org.advisers.map((a) => a.adviser.id),
+      dean?.id,
+    ]),
+    getApproversSignatures(),
+  ]);
 
   const rows: Sf004Activity[] = activities.map((a) => ({
     objective: a.objectives ?? "",
@@ -96,6 +106,12 @@ export default async function Sf004Page({
         )}
         deanName={dean ? `${dean.firstName} ${dean.lastName}` : ""}
         activities={rows}
+        presidentSig={president ? sigMap.get(president.id) ?? null : null}
+        secretarySig={secretary ? sigMap.get(secretary.id) ?? null : null}
+        adviserSigs={org.advisers.map((a) => sigMap.get(a.adviser.id) ?? null)}
+        deanSig={dean ? sigMap.get(dean.id) ?? null : null}
+        coordinatorSig={approverSigs.coordinator}
+        directorSig={approverSigs.director}
       />
     </>
   );

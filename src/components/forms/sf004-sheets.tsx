@@ -2,7 +2,13 @@
 
 import { useState } from "react";
 import { Editable } from "@/components/forms/editable";
-import { SfApprovers, SfFooter, SfLetterhead } from "@/components/forms/sf-chrome";
+import {
+  SfApprovers,
+  SfFooter,
+  SfLetterhead,
+  SfSig,
+} from "@/components/forms/sf-chrome";
+import type { SignatureInfo } from "@/lib/signatures";
 
 export type Sf004Activity = {
   objective: string;
@@ -30,6 +36,12 @@ export function Sf004Sheets({
   adviserNames,
   deanName,
   activities,
+  presidentSig,
+  secretarySig,
+  adviserSigs,
+  deanSig,
+  coordinatorSig,
+  directorSig,
 }: {
   orgDisplay: string;
   ayStart: string;
@@ -39,6 +51,12 @@ export function Sf004Sheets({
   adviserNames: string[];
   deanName: string;
   activities: Sf004Activity[];
+  presidentSig?: SignatureInfo | null;
+  secretarySig?: SignatureInfo | null;
+  adviserSigs?: Array<SignatureInfo | null>;
+  deanSig?: SignatureInfo | null;
+  coordinatorSig?: SignatureInfo | null;
+  directorSig?: SignatureInfo | null;
 }) {
   const [pages, setPages] = useState<Row[]>(
     activities.length > 0 ? activities : [BLANK]
@@ -125,39 +143,57 @@ export function Sf004Sheets({
           <div className="mt-8">
             <p className="font-bold">Prepared by:</p>
             <div className="mt-6 flex justify-between gap-8">
-              <div className="text-center">
-                <Editable initial={presidentName} minWidth="60mm" center ariaLabel="President signature" />
-                <p className="mt-0.5">Organization President</p>
-              </div>
-              <div className="text-center">
-                <Editable initial={secretaryName} minWidth="60mm" center ariaLabel="Secretary signature" />
-                <p className="mt-0.5">Organization Secretary</p>
-              </div>
+              <SfSig
+                name={presidentName}
+                caption="Organization President"
+                width="60mm"
+                sig={presidentSig}
+                ariaLabel="President signature"
+              />
+              <SfSig
+                name={secretaryName}
+                caption="Organization Secretary"
+                width="60mm"
+                sig={secretarySig}
+                ariaLabel="Secretary signature"
+              />
             </div>
 
             <p className="mt-6 font-bold">Noted:</p>
             <div className="mt-6 space-y-6">
               {adviserNames.length > 0 ? (
                 adviserNames.map((name, j) => (
-                  <div key={j} className="w-fit">
-                    <Editable initial={name} minWidth="60mm" ariaLabel="Adviser signature" />
-                    <p className="mt-0.5">Organization Adviser</p>
-                  </div>
+                  <SfSig
+                    key={j}
+                    name={name}
+                    caption="Organization Adviser"
+                    width="60mm"
+                    center={false}
+                    sig={adviserSigs?.[j] ?? null}
+                    ariaLabel="Adviser signature"
+                  />
                 ))
               ) : (
-                <div className="w-fit">
-                  <Editable initial="" minWidth="60mm" ariaLabel="Adviser signature" />
-                  <p className="mt-0.5">Organization Adviser(s)</p>
-                </div>
+                <SfSig
+                  name=""
+                  caption="Organization Adviser(s)"
+                  width="60mm"
+                  center={false}
+                  ariaLabel="Adviser signature"
+                />
               )}
-              <div className="w-fit">
-                <Editable initial={deanName} minWidth="60mm" ariaLabel="Dean signature" />
-                <p className="mt-0.5">Dean/Assoc. Dean of College</p>
-              </div>
+              <SfSig
+                name={deanName}
+                caption="Dean/Assoc. Dean of College"
+                width="60mm"
+                center={false}
+                sig={deanSig}
+                ariaLabel="Dean signature"
+              />
             </div>
           </div>
 
-          <SfApprovers />
+          <SfApprovers coordinatorSig={coordinatorSig} directorSig={directorSig} />
 
           {/* Form footer, exactly as in the DOCX: code · revision · date */}
           <SfFooter code="LSPU-OSAS-SF-004" />

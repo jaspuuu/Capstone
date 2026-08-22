@@ -47,6 +47,11 @@ model User {
   // before they can use the system.
   mustChangePassword Boolean @default(false)
   lastLoginAt   DateTime?
+  // Saved e-signature (drawn, uploaded, or typed). At most one of image/typed
+  // is set; method records which input produced it. Null = no signature yet.
+  signatureImage  String?
+  signatureTyped  String?
+  signatureMethod String?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 

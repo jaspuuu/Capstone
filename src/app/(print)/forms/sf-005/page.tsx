@@ -5,8 +5,15 @@ import { requireUser } from "@/lib/auth/guards";
 import { currentAcademicYear } from "@/lib/utils";
 import { canUseOrgForm } from "@/lib/forms-access";
 import { Editable, PrintToolbar } from "@/components/forms/editable";
-import { SfApprovers, SfFooter, SfLetterhead } from "@/components/forms/sf-chrome";
+import {
+  SfApprovers,
+  SfFooter,
+  SfLetterhead,
+  SfSig,
+  SignatureMark,
+} from "@/components/forms/sf-chrome";
 import { FormOrgPicker } from "@/components/forms/org-picker";
+import { getApproversSignatures, getSignaturesFor } from "@/lib/signatures";
 
 export const metadata: Metadata = { title: "SF-005 · List of Members of the Organization" };
 
@@ -33,13 +40,14 @@ export default async function Sf005Page({
       name: true,
       acronym: true,
       collegeId: true,
-      college: { select: { name: true, dean: { select: { firstName: true, lastName: true } } } },
+      college: { select: { name: true, dean: { select: { id: true, firstName: true, lastName: true } } } },
       members: {
         where: { isCurrent: true, academicYear: ay },
         orderBy: [{ position: "asc" }, { user: { lastName: "asc" } }],
         select: {
           user: {
             select: {
+              id: true,
               firstName: true,
               middleName: true,
               lastName: true,
@@ -51,7 +59,7 @@ export default async function Sf005Page({
       },
       advisers: {
         where: { isCurrent: true, academicYear: ay },
-        select: { adviser: { select: { firstName: true, lastName: true } } },
+        select: { adviser: { select: { id: true, firstName: true, lastName: true } } },
       },
     },
   });
@@ -61,6 +69,11 @@ export default async function Sf005Page({
   const dean = org.college.dean;
   const orgDisplay = org.acronym ? `${org.name} (${org.acronym})` : org.name;
   const [ayStart, ayEnd] = ay.split("-");
+  const memberIds = org.members.map((m) => m.user.id);
+  const [sigMap, approverSigs] = await Promise.all([
+    getSignaturesFor([...memberIds, ...org.advisers.map((a) => a.adviser.id), dean?.id]),
+    getApproversSignatures(),
+  ]);
 
   return (
     <>
@@ -92,6 +105,7 @@ export default async function Sf005Page({
                 PICTURE
               </div>
               <div className="mt-1">
+                {sigMap.get(m.user.id) && <SignatureMark sig={sigMap.get(m.user.id)!} />}
                 <Editable
                   initial={`${m.user.firstName}${m.user.middleName ? ` ${m.user.middleName}` : ""} ${m.user.lastName}`}
                   block
@@ -121,23 +135,40 @@ export default async function Sf005Page({
         {/* Adviser columns */}
         <div className="mt-10 flex justify-around gap-8">
           {[0, 1].map((i) => (
-            <div key={i} className="w-fit text-center">
-              <Editable initial={org.advisers[i] ? `${org.advisers[i].adviser.firstName} ${org.advisers[i].adviser.lastName}` : ""} minWidth="55mm" center ariaLabel={`Adviser signature ${i + 1}`} />
-              <p className="mt-0.5">Organization Adviser</p>
-              <p className="mt-3">
-                Date: <Editable initial="" minWidth="35mm" ariaLabel={`Adviser date ${i + 1}`} />
-              </p>
-            </div>
+            <SfSig
+              key={i}
+              name={org.advisers[i] ? `${org.advisers[i].adviser.firstName} ${org.advisers[i].adviser.lastName}` : ""}
+              width="55mm"
+              sig={org.advisers[i] ? sigMap.get(org.advisers[i].adviser.id) : null}
+              ariaLabel={`Adviser signature ${i + 1}`}
+              caption={
+                <>
+                  Organization Adviser
+                  <span className="mt-3 block">
+                    Date: <Editable initial="" minWidth="35mm" ariaLabel={`Adviser date ${i + 1}`} />
+                  </span>
+                </>
+              }
+            />
           ))}
         </div>
 
         <p className="mt-8 font-bold">Noted:</p>
-        <div className="mt-6 w-fit">
-          <Editable initial={dean ? `${dean.firstName} ${dean.lastName}` : ""} minWidth="60mm" ariaLabel="Dean signature" />
-          <p className="mt-0.5">Dean/Assoc. Dean of College</p>
+        <div className="mt-6">
+          <SfSig
+            name={dean ? `${dean.firstName} ${dean.lastName}` : ""}
+            caption="Dean/Assoc. Dean of College"
+            width="60mm"
+            center={false}
+            sig={dean ? sigMap.get(dean.id) : null}
+            ariaLabel="Dean signature"
+          />
         </div>
 
-        <SfApprovers />
+        <SfApprovers
+          coordinatorSig={approverSigs.coordinator}
+          directorSig={approverSigs.director}
+        />
         <SfFooter code="LSPU-OSAS-SF-005" />
       </div>
     </>

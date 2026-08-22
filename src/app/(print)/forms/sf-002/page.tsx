@@ -5,8 +5,9 @@ import { requireUser } from "@/lib/auth/guards";
 import { currentAcademicYear } from "@/lib/utils";
 import { canUseOrgForm } from "@/lib/forms-access";
 import { Editable, PrintToolbar } from "@/components/forms/editable";
-import { SfApprovers, SfDateBlank, SfFooter, SfLetterhead } from "@/components/forms/sf-chrome";
+import { SfApprovers, SfDateBlank, SfFooter, SfLetterhead, SfSig } from "@/components/forms/sf-chrome";
 import { FormOrgPicker } from "@/components/forms/org-picker";
+import { getApproversSignatures, getSignaturesFor } from "@/lib/signatures";
 
 export const metadata: Metadata = { title: "SF-002 · Organization Renewal Form" };
 
@@ -28,14 +29,16 @@ export default async function Sf002Page({
       name: true,
       acronym: true,
       collegeId: true,
-      college: { select: { name: true, dean: { select: { firstName: true, lastName: true } } } },
+      college: { select: { name: true, dean: { select: { id: true, firstName: true, lastName: true } } } },
       members: {
         where: { isCurrent: true, academicYear: ay },
-        select: { position: true, user: { select: { firstName: true, lastName: true } } },
+        select: { position: true, user: { select: { id: true, firstName: true, lastName: true } } },
       },
       advisers: {
         where: { isCurrent: true, academicYear: ay },
-        select: { adviser: { select: { firstName: true, lastName: true, middleName: true } } },
+        select: {
+          adviser: { select: { id: true, firstName: true, lastName: true, middleName: true } },
+        },
       },
     },
   });
@@ -44,6 +47,14 @@ export default async function Sf002Page({
 
   const president = org.members.find((m) => m.position === "PRESIDENT")?.user;
   const dean = org.college.dean;
+  const [sigMap, approverSigs] = await Promise.all([
+    getSignaturesFor([
+      president?.id,
+      ...org.advisers.map((a) => a.adviser.id),
+      dean?.id,
+    ]),
+    getApproversSignatures(),
+  ]);
   const orgDisplay = org.acronym ? `${org.name} (${org.acronym})` : org.name;
   const [ayStart, ayEnd] = ay.split("-");
 
@@ -85,8 +96,13 @@ export default async function Sf002Page({
 
         <p className="mt-5 ml-auto w-fit mr-[25mm]">Very respectfully yours,</p>
         <div className="ml-auto mr-[15mm] w-fit text-center">
-          <Editable initial={president ? `${president.firstName} ${president.lastName}` : ""} minWidth="55mm" center ariaLabel="Organization President signature" />
-          <p className="mt-0.5">Organization President</p>
+          <SfSig
+            name={president ? `${president.firstName} ${president.lastName}` : ""}
+            caption="Organization President"
+            width="55mm"
+            sig={president ? sigMap.get(president.id) : null}
+            ariaLabel="Organization President signature"
+          />
         </div>
         <div className="ml-auto mr-[15mm] mt-5 w-fit text-center">
           <Editable initial={orgDisplay} minWidth="55mm" center ariaLabel="Name of Organization" />
@@ -98,28 +114,45 @@ export default async function Sf002Page({
           <div className="space-y-6">
             {org.advisers.length > 0 ? (
               org.advisers.map((a, i) => (
-                <div key={i} className="w-fit">
-                  <Editable initial={`${a.adviser.firstName}${a.adviser.middleName ? ` ${a.adviser.middleName}` : ""} ${a.adviser.lastName}`} minWidth="60mm" ariaLabel="Adviser signature" />
-                  <p className="mt-0.5">Adviser/s Student Organization</p>
-                </div>
+                <SfSig
+                  key={i}
+                  name={`${a.adviser.firstName}${a.adviser.middleName ? ` ${a.adviser.middleName}` : ""} ${a.adviser.lastName}`}
+                  caption="Adviser/s Student Organization"
+                  width="60mm"
+                  center={false}
+                  sig={sigMap.get(a.adviser.id)}
+                  ariaLabel="Adviser signature"
+                />
               ))
             ) : (
-              <div className="w-fit">
-                <Editable initial="" minWidth="60mm" ariaLabel="Adviser signature" />
-                <p className="mt-0.5">Adviser/s Student Organization</p>
-              </div>
+              <SfSig
+                name=""
+                caption="Adviser/s Student Organization"
+                width="60mm"
+                center={false}
+                ariaLabel="Adviser signature"
+              />
             )}
           </div>
-          <div className="w-fit">
-            <Editable initial={dean ? `${dean.firstName} ${dean.lastName}` : ""} minWidth="80mm" ariaLabel="Dean signature" />
-            <p className="mt-0.5">
-              Dean/Assoc. Dean, College of{" "}
-              <Editable initial={org.college.name} minWidth="35mm" ariaLabel="College" />
-            </p>
-          </div>
+          <SfSig
+            name={dean ? `${dean.firstName} ${dean.lastName}` : ""}
+            width="80mm"
+            center={false}
+            sig={dean ? sigMap.get(dean.id) : null}
+            ariaLabel="Dean signature"
+            caption={
+              <>
+                Dean/Assoc. Dean, College of{" "}
+                <Editable initial={org.college.name} minWidth="35mm" ariaLabel="College" />
+              </>
+            }
+          />
         </div>
 
-        <SfApprovers />
+        <SfApprovers
+          coordinatorSig={approverSigs.coordinator}
+          directorSig={approverSigs.director}
+        />
         <SfFooter code="LSPU-OSAS-SF-002" />
       </div>
     </>

@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
-import { KeyRound, ShieldCheck } from "lucide-react";
+import Link from "next/link";
+import { KeyRound, PenLine, ShieldCheck } from "lucide-react";
 import { requireUser } from "@/lib/auth/guards";
 import { db } from "@/lib/db";
 import { ROLE_LABELS } from "@/lib/constants";
 import { formatDateTime, fullName } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import { ChangePasswordForm } from "./change-password-form";
@@ -143,6 +145,19 @@ export default async function ProfilePage() {
           <CardHeader icon={KeyRound} title="Change password" description="Choose a strong password you do not use elsewhere." />
           <CardContent>
             <ChangePasswordForm />
+          </CardContent>
+        </Card>
+
+        <Card className="lg:col-span-2">
+          <CardHeader
+            icon={PenLine}
+            title="E-signature"
+            description="Draw, upload, or type your signature — it then appears above your name line on SF forms."
+          />
+          <CardContent>
+            <Link href="/profile/signature">
+              <Button variant="outline">Manage my signature</Button>
+            </Link>
           </CardContent>
         </Card>
       </div>
