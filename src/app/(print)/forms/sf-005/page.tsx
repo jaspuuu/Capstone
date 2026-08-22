@@ -95,43 +95,53 @@ export default async function Sf005Page({
           <Editable initial={orgDisplay} minWidth="80mm" ariaLabel="Name of Organization" />
         </p>
 
-        {/* Sample-format label from the official form, then one card per member */}
+        {/* Sample-format block from the official form: one labeled example slot */}
         <p className="mt-4 font-bold">SAMPLE FORMAT:</p>
-        <div className="mt-2 grid grid-cols-4 gap-x-3 gap-y-5">
-          {org.members.map((m, i) => (
-            <div key={i} className="text-center">
-              <div className="mx-auto flex h-[24mm] w-[28mm] items-center justify-center border border-black text-center text-[9pt] leading-tight text-black">
-                1 x 1
-                <br />
-                PICTURE
-              </div>
-              <div className="mt-1">
-                {sigMap.get(m.user.id) && <SignatureMark sig={sigMap.get(m.user.id)!} />}
-                <Editable
-                  initial={`${m.user.firstName}${m.user.middleName ? ` ${m.user.middleName}` : ""} ${m.user.lastName}`}
-                  block
-                  center
-                  minWidth="38mm"
-                  ariaLabel={`Signature over printed name ${i + 1}`}
-                />
-                <p className="text-[9pt]">(Signature Over Printed Name)</p>
-              </div>
-              <div className="mt-0.5">
-                <Editable initial={m.user.studentNumber ?? ""} block center minWidth="38mm" ariaLabel={`Student number ${i + 1}`} />
-                <p className="text-[9pt]">(Student Number)</p>
-              </div>
-              <div className="mt-0.5">
-                <Editable initial={m.user.department?.name ?? ""} block center minWidth="38mm" ariaLabel={`Course/year/section ${i + 1}`} />
-                <p className="text-[9pt]">(Course / Year Section)</p>
-              </div>
+        <div className="mt-2 flex justify-center">
+          <div className="text-center">
+            <div className="mx-auto flex h-[24mm] w-[28mm] items-center justify-center border border-black text-center text-[9pt] leading-tight text-black">
+              1 x 1
+              <br />
+              PICTURE
             </div>
-          ))}
-          {org.members.length === 0 && (
-            <div className="col-span-4 border border-dashed border-line-strong p-4 text-center text-content-secondary">
-              No members on record for AY {ay}.
+            <div className="mt-1 space-y-0.5">
+              <Editable initial="" block center minWidth="45mm" ariaLabel="Sample signature over printed name" />
+              <Editable initial="" block center minWidth="45mm" ariaLabel="Sample student number" />
+              <Editable initial="" block center minWidth="45mm" ariaLabel="Sample course/year/section" />
             </div>
-          )}
+          </div>
         </div>
+
+        {/* Member slots — 9 photo boxes per sheet, each with ruled lines like the official form */}
+        {Array.from({ length: Math.max(1, Math.ceil(org.members.length / 9)) }, (_, gi) => (
+          <div key={gi} className="mt-6 grid grid-cols-3 gap-x-6 gap-y-8">
+            {Array.from({ length: 9 }, (_, slot) => {
+              const m = org.members[gi * 9 + slot];
+              const n = gi * 9 + slot + 1;
+              return (
+                <div key={slot} className="text-center">
+                  <div className="mx-auto flex h-[24mm] w-[28mm] items-center justify-center border border-black text-center text-[9pt] leading-tight text-black">
+                    1 x 1
+                    <br />
+                    PICTURE
+                  </div>
+                  <div className="mt-1 space-y-0.5">
+                    {m && sigMap.get(m.user.id) && <SignatureMark sig={sigMap.get(m.user.id)!} />}
+                    <Editable
+                      initial={m ? `${m.user.firstName}${m.user.middleName ? ` ${m.user.middleName}` : ""} ${m.user.lastName}` : ""}
+                      block
+                      center
+                      minWidth="45mm"
+                      ariaLabel={`Signature over printed name ${n}`}
+                    />
+                    <Editable initial={m?.user.studentNumber ?? ""} block center minWidth="45mm" ariaLabel={`Student number ${n}`} />
+                    <Editable initial={m?.user.department?.name ?? ""} block center minWidth="45mm" ariaLabel={`Course/year/section ${n}`} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ))}
 
         {/* Adviser columns */}
         <div className="mt-10 flex justify-around gap-8">
