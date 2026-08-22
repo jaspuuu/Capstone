@@ -1,0 +1,514 @@
+// ORGanIZE - LSPU-OSAS Student Organization Management System
+// Core foundation schema: accounts/RBAC, colleges, organizations,
+// recognition & renewal lifecycle, deadlines, sessions, audit log.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Accounts & access control
+// ---------------------------------------------------------------------------
+
+enum Role {
+  OSAS
+  SOA
+  DEAN
+  ADVISER_REGULAR
+  ADVISER_PARTTIME
+  PRESIDENT
+  SECRETARY
+  MEMBER
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  passwordHash  String
+  firstName     String
+  lastName      String
+  middleName    String?
+  role          Role
+  // Administrative scope (OSAS/SOA may be campus-wide; Dean scoped to college)
+  collegeId     String?
+  college       College?  @relation("UserCollege", fields: [collegeId], references: [id])
+  departmentId  String?
+  department    Department? @relation("UserDepartment", fields: [departmentId], references: [id])
+  studentNumber String?   @unique
+  positionTitle String?
+  isActive      Boolean   @default(true)
+  isViewOnly    Boolean   @default(false)
+  // Set when an admin issues a temporary password; the user must change it
+  // before they can use the system.
+  mustChangePassword Boolean @default(false)
+  lastLoginAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  sessions           Session[]
+  memberships        OrganizationMember[]
+  adviserAssignments AdviserAssignment[]
+  deanOfColleges     College[]            @relation("CollegeDean")
+  auditLogs          AuditLog[]
+  recognitionEvents  RecognitionEvent[]   @relation("RecognitionEventActor")
+  decidedRecognitions Recognition[]       @relation("RecognitionDecidedBy")
+  decidedProposals   ActivityProposal[]   @relation("ProposalDecidedBy")
+  decidedReports     AccomplishmentReport[] @relation("ReportDecidedBy")
+  createdDeadlines   Deadline[]           @relation("DeadlineCreator")
+  uploadedAttachments Attachment[]        @relation("AttachmentUploader")
+  notifications       Notification[]      @relation("NotificationRecipient")
+  attendanceRecords   ActivityAttendance[] @relation("ActivityAttendanceUser")
+  recordedAttendance  ActivityAttendance[] @relation("ActivityAttendanceRecorder")
+  createdCheckIns     ActivityCheckIn[]    @relation("CheckInCreator")
+
+  @@index([role])
+  @@index([collegeId])
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
+// Academic structure
+// ---------------------------------------------------------------------------
+
+model College {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  code      String   @unique
+  deanId    String?
+  dean      User?    @relation("CollegeDean", fields: [deanId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  departments   Department[]
+  organizations Organization[]
+  users         User[]         @relation("UserCollege")
+  deadlines     Deadline[]
+}
+
+model Department {
+  id        String   @id @default(cuid())
+  name      String
+  code      String   @unique
+  collegeId String
+  college   College  @relation(fields: [collegeId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organizations Organization[]
+  users         User[]         @relation("UserDepartment")
+
+  @@unique([collegeId, name])
+}
+
+// ---------------------------------------------------------------------------
+// Organizations
+// ---------------------------------------------------------------------------
+
+enum OrgType {
+  MOTHER
+  CHILD
+  INDEPENDENT
+}
+
+enum OrgStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum MemberPosition {
+  PRESIDENT
+  SECRETARY
+  MEMBER
+}
+
+enum AdviserType {
+  REGULAR
+  PART_TIME
+}
+
+model Organization {
+  id          String    @id @default(cuid())
+  name        String
+  acronym     String?
+  description String?
+  type        OrgType   @default(INDEPENDENT)
+  parentId    String?
+  parent      Organization?  @relation("OrgHierarchy", fields: [parentId], references: [id])
+  children    Organization[] @relation("OrgHierarchy")
+  collegeId   String
+  college     College   @relation(fields: [collegeId], references: [id])
+  departmentId String?
+  department  Department? @relation(fields: [departmentId], references: [id])
+  status      OrgStatus @default(ACTIVE)
+  foundedYear Int?
+  archivedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  advisers     AdviserAssignment[]
+  members      OrganizationMember[]
+  recognitions Recognition[]
+  activities   ActivityProposal[]
+  reports      AccomplishmentReport[]
+
+  @@index([collegeId])
+  @@index([type])
+  @@index([status])
+}
+
+model OrganizationMember {
+  id             String         @id @default(cuid())
+  organizationId String
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  position       MemberPosition @default(MEMBER)
+  academicYear   String
+  isCurrent      Boolean        @default(true)
+  joinedAt       DateTime       @default(now())
+
+  @@unique([organizationId, userId, academicYear])
+  @@index([userId])
+}
+
+model AdviserAssignment {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  adviserId      String
+  adviser        User         @relation(fields: [adviserId], references: [id], onDelete: Cascade)
+  type           AdviserType
+  academicYear   String
+  isCurrent      Boolean      @default(true)
+  assignedAt     DateTime     @default(now())
+
+  @@unique([organizationId, type, academicYear])
+  @@index([adviserId])
+}
+
+// ---------------------------------------------------------------------------
+// Recognition / accreditation / renewal lifecycle
+// ---------------------------------------------------------------------------
+
+enum RecognitionKind {
+  INITIAL
+  RENEWAL
+}
+
+enum RecognitionStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  FOR_APPROVAL
+  APPROVED
+  RECOGNIZED
+  RETURNED
+  REJECTED
+  EXPIRED
+}
+
+model Recognition {
+  id             String            @id @default(cuid())
+  organizationId String
+  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  kind           RecognitionKind   @default(INITIAL)
+  academicYear   String
+  status         RecognitionStatus @default(DRAFT)
+  submittedAt    DateTime?
+  reviewedAt     DateTime?
+  decidedAt      DateTime?
+  decidedById    String?
+  decidedBy      User?             @relation("RecognitionDecidedBy", fields: [decidedById], references: [id])
+  remarks        String?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  events RecognitionEvent[]
+
+  @@unique([organizationId, academicYear])
+  @@index([status])
+}
+
+model RecognitionEvent {
+  id            String            @id @default(cuid())
+  recognitionId String
+  recognition   Recognition       @relation(fields: [recognitionId], references: [id], onDelete: Cascade)
+  actorId       String?
+  actor         User?             @relation("RecognitionEventActor", fields: [actorId], references: [id])
+  action        String
+  fromStatus    RecognitionStatus?
+  toStatus      RecognitionStatus?
+  note          String?
+  createdAt     DateTime          @default(now())
+
+  @@index([recognitionId])
+}
+
+// ---------------------------------------------------------------------------
+// Activity proposals & accomplishment reports
+// Lifecycle mirrors recognition: officers file, adviser endorses, college or
+// university authorities approve. Histories are kept in AuditLog.
+// ---------------------------------------------------------------------------
+
+enum ActivityScope {
+  ORGANIZATION
+  COLLEGE
+  UNIVERSITY
+}
+
+enum ProposalStatus {
+  DRAFT
+  SUBMITTED
+  ENDORSED
+  APPROVED
+  RETURNED
+  REJECTED
+  COMPLETED
+}
+
+model ActivityProposal {
+  id             String        @id @default(cuid())
+  organizationId String
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  academicYear   String
+  title              String
+  description        String
+  objectives         String?
+  venue          String?
+  startAt        DateTime
+  endAt          DateTime
+  scope          ActivityScope @default(ORGANIZATION)
+  estimatedBudget Float?
+  expectedParticipants Int?
+  status         ProposalStatus @default(DRAFT)
+  submittedAt    DateTime?
+  decidedAt      DateTime?
+  decidedById    String?
+  decidedBy      User?         @relation("ProposalDecidedBy", fields: [decidedById], references: [id])
+  remarks        String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  report AccomplishmentReport?
+  attendanceRecords ActivityAttendance[]
+  checkIn           ActivityCheckIn?
+
+  @@index([organizationId])
+  @@index([status])
+  @@index([academicYear])
+}
+
+// ---------------------------------------------------------------------------
+// Attendance & participation (§Part 6). Roster rows overlay the organization's
+// current membership; QR check-in is a lightweight presence proof.
+// ---------------------------------------------------------------------------
+
+enum AttendanceStatus {
+  PRESENT
+  LATE
+  ABSENT
+  EXCUSED
+}
+
+enum AttendanceSource {
+  MANUAL
+  QR_CHECKIN
+}
+
+model ActivityAttendance {
+  id           String           @id @default(cuid())
+  activityId   String
+  activity     ActivityProposal @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User             @relation("ActivityAttendanceUser", fields: [userId], references: [id], onDelete: Cascade)
+  status       AttendanceStatus @default(PRESENT)
+  source       AttendanceSource @default(MANUAL)
+  recordedById String?
+  recordedBy   User?            @relation("ActivityAttendanceRecorder", fields: [recordedById], references: [id])
+  remarks      String?
+  recordedAt   DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  @@unique([activityId, userId])
+  @@index([activityId])
+}
+
+model ActivityCheckIn {
+  id          String           @id @default(cuid())
+  activityId  String           @unique
+  activity    ActivityProposal @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  // Random token embedded in the QR code; only holders of the scanned link
+  // can check in while the window is open.
+  token       String           @unique
+  closedAt    DateTime?
+  createdById String
+  createdBy   User             @relation("CheckInCreator", fields: [createdById], references: [id])
+  createdAt   DateTime         @default(now())
+}
+
+enum ReportStatus {
+  DRAFT
+  SUBMITTED
+  ACCEPTED
+  RETURNED
+}
+
+model AccomplishmentReport {
+  id                 String         @id @default(cuid())
+  organizationId     String
+  organization       Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  // Optional link: reports may document an approved proposal or stand alone
+  // for unplanned activities (configurable policy).
+  activityProposalId String?        @unique
+  activityProposal   ActivityProposal? @relation(fields: [activityProposalId], references: [id])
+  academicYear       String
+  title              String
+  narrative          String
+  heldOn             DateTime
+  actualParticipants Int?
+  actualBudget       Float?
+  status             ReportStatus   @default(DRAFT)
+  submittedAt        DateTime?
+  reviewedAt         DateTime?
+  decidedById        String?
+  decidedBy          User?          @relation("ReportDecidedBy", fields: [decidedById], references: [id])
+  remarks            String?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  @@index([organizationId])
+  @@index([status])
+  @@index([academicYear])
+}
+
+// ---------------------------------------------------------------------------
+// Deadlines (created by OSAS, manageable by SOA where authorized)
+// ---------------------------------------------------------------------------
+
+enum DeadlineProcess {
+  RECOGNITION
+  RENEWAL
+  ACTIVITY
+  ACCOMPLISHMENT
+  OTHER
+}
+
+enum DeadlineScope {
+  ALL
+  MOTHER
+  CHILD
+  INDEPENDENT
+}
+
+model Deadline {
+  id            String          @id @default(cuid())
+  name          String
+  process       DeadlineProcess
+  academicYear  String
+  startDate     DateTime
+  dueDate       DateTime
+  scopeType     DeadlineScope   @default(ALL)
+  scopeCollegeId String?
+  scopeCollege  College?        @relation(fields: [scopeCollegeId], references: [id])
+  instructions  String?
+  isActive      Boolean         @default(true)
+  createdById   String
+  createdBy     User            @relation("DeadlineCreator", fields: [createdById], references: [id])
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  @@index([academicYear])
+  @@index([process])
+}
+
+// ---------------------------------------------------------------------------
+// Attachments (files stored on disk; metadata here)
+// ---------------------------------------------------------------------------
+
+// Which accreditation requirement an uploaded file satisfies (SF-001
+// checklist). Only meaningful for Recognition attachments; other parents
+// leave it null.
+enum AttachmentKind {
+  CONSTITUTION
+  PLAN_OF_ACTIVITIES
+  ACCOMPLISHMENT_REPORTS
+  ADVISER_COMMITMENT
+  CERTIFICATION
+  FINANCIAL_REPORT
+}
+
+model Attachment {
+  id           String   @id @default(cuid())
+  // Parent record: "Recognition" | "ActivityProposal" | "AccomplishmentReport"
+  entityType   String
+  entityId     String
+  fileName     String
+  storedName   String   @unique
+  mimeType     String
+  sizeBytes    Int
+  kind         AttachmentKind?
+  uploadedById String
+  uploadedBy   User     @relation("AttachmentUploader", fields: [uploadedById], references: [id])
+  createdAt    DateTime @default(now())
+
+  @@index([entityType, entityId])
+}
+
+// ---------------------------------------------------------------------------
+// In-app notifications (Part 9 - automated deadline notifications & alerts)
+// Fan-out rows per recipient; created as a side effect of workflow events.
+// ---------------------------------------------------------------------------
+
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation("NotificationRecipient", fields: [userId], references: [id], onDelete: Cascade)
+  type      String
+  title     String
+  body      String?
+  link      String?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, readAt, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Audit trail
+// ---------------------------------------------------------------------------
+
+model AuditLog {
+  id            String   @id @default(cuid())
+  userId        String?
+  user          User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action        String
+  entityType    String
+  entityId      String?
+  entityLabel   String?
+  previousState Json?
+  newState      Json?
+  ipAddress     String?
+  userAgent     String?
+  createdAt     DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([entityType, entityId])
+  @@index([userId])
+}

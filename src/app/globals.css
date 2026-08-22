@@ -1,0 +1,189 @@
+@import "tailwindcss";
+
+/*
+ * ORGanIZE design tokens (§35-36).
+ * Deep institutional blue dominates; gold is reserved for recognition
+ * and achievement. All colors defined once, consumed via Tailwind utilities.
+ */
+@theme {
+  --color-primary: #123b63;
+  --color-primary-dark: #0b2945;
+  --color-primary-hover: #174b7a;
+  --color-primary-light: #eaf2f8;
+
+  --color-gold: #c9a227;
+  --color-gold-dark: #a88418;
+  --color-gold-light: #f8f1d8;
+
+  --color-background: #f7f9fc;
+  --color-surface: #ffffff;
+  --color-surface-secondary: #f1f5f9;
+
+  --color-content: #172033;
+  --color-content-secondary: #667085;
+  --color-content-muted: #98a2b3;
+
+  --color-line: #e5e9f0;
+  --color-line-strong: #d0d5dd;
+
+  --color-success: #168a5b;
+  --color-success-light: #e3f4ec;
+  --color-warning: #d99000;
+  --color-warning-light: #fdf3dd;
+  --color-info: #3678c4;
+  --color-info-light: #e8f1fb;
+  --color-danger: #c74747;
+  --color-danger-light: #fbe9e9;
+
+  --color-sidebar: #0b2945;
+  --color-sidebar-hover: #123b63;
+  --color-sidebar-active: #1b527f;
+  --color-sidebar-text: #ffffff;
+  --color-sidebar-text-secondary: #dce6f0;
+  --color-sidebar-text-muted: #9fb2c5;
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-manrope), var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+
+  --shadow-card: 0 1px 2px 0 rgb(16 24 40 / 0.05);
+  --shadow-pop: 0 8px 24px -6px rgb(11 41 69 / 0.18);
+
+  --breakpoint-xs: 26rem;
+}
+
+body {
+  background-color: var(--color-background);
+  color: var(--color-content);
+  font-family: var(--font-sans);
+}
+
+/* Visible focus states everywhere (§40) */
+:focus-visible {
+  outline: 2px solid var(--color-info);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Thin, unobtrusive scrollbars for table/panel overflow */
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line-strong) transparent;
+}
+
+/* ---------------------------------------------------------------------------
+ * Official student forms (SF series) — print-perfect replicas.
+ * The sheet is a fixed A4 page; the browser prints it 1:1 via @page margin 0.
+ * ------------------------------------------------------------------------- */
+
+/* Free blackletter fallback for machines without the MS Office font
+   "Old English Text MT" — keeps letterheads identical on every device. */
+@font-face {
+  font-family: "UnifrakturMaguntia";
+  src: url("/fonts/UnifrakturMaguntia.ttf") format("truetype");
+  font-display: swap;
+}
+
+@page {
+  size: A4 portrait;
+  margin: 0;
+}
+
+.sf-sheet {
+  display: flex;
+  flex-direction: column;
+  width: 210mm;
+  min-height: 297mm;
+  margin: 3.5rem auto 2rem;
+  padding: 11mm 25.4mm 12.7mm;
+  background: #fff;
+  color: #000;
+  font-family: "Times New Roman", Times, serif;
+  font-size: 12pt;
+  line-height: 1.35;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.15), 0 8px 24px rgb(0 0 0 / 0.08);
+}
+
+/* Flowing variant: grows with content (member rosters span multiple pages). */
+.sf-sheet-flow {
+  width: 210mm;
+  margin: 3.5rem auto 2rem;
+  padding: 11mm 25.4mm 12.7mm;
+  background: #fff;
+  color: #000;
+  font-family: "Times New Roman", Times, serif;
+  font-size: 12pt;
+  line-height: 1.35;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.15), 0 8px 24px rgb(0 0 0 / 0.08);
+}
+
+/* Form-code footer pinned to the bottom of the sheet (mirrors the DOCX footer). */
+.sf-sheet .sf-footer {
+  margin-top: auto;
+  padding-top: 6mm;
+  font-family: Calibri, Carlito, "Segoe UI", sans-serif;
+  font-size: 11pt;
+}
+
+.sf-sheet .sf-editable {
+  border-bottom: 1px solid #000;
+  padding: 0 2mm;
+  cursor: text;
+  min-height: 1.2em;
+}
+
+.sf-sheet .sf-editable:focus {
+  outline: 1px dashed var(--color-info);
+  outline-offset: 1px;
+}
+
+.sf-sheet table.sf-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+
+.sf-sheet table.sf-table th,
+.sf-sheet table.sf-table td {
+  border: 1px solid #000;
+  vertical-align: top;
+  overflow-wrap: normal;
+  word-break: keep-all;
+}
+
+.sf-sheet table.sf-table th {
+  font-weight: normal;
+  text-align: center;
+  padding: 1.5mm 0.5mm;
+}
+
+/* Body cells are plain text in the original form - never bold, words intact.
+   Font size inherits from the sheet (Times New Roman 14pt). */
+.sf-sheet table.sf-table td {
+  font-weight: normal;
+  padding: 1mm;
+}
+
+.sf-sheet table.sf-table td .sf-editable {
+  font-weight: inherit;
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  body {
+    background: #fff !important;
+  }
+  .print-root {
+    padding: 0 !important;
+  }
+  /* One A4 sheet per printed page, no gaps between them. */
+  .sf-sheet {
+    margin: 0 auto !important;
+    box-shadow: none !important;
+    break-after: page;
+  }
+  .sf-sheet:last-of-type {
+    break-after: auto;
+  }
+}
