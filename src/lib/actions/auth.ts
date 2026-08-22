@@ -76,6 +76,60 @@ export async function logout(): Promise<void> {
   redirect("/login");
 }
 
+export type SignUpState = { error?: string };
+
+/**
+ * Public self-registration. New accounts always land on the least-privileged
+ * MEMBER role — privileged roles can only be granted by an administrator.
+ */
+export async function signUp(_prev: SignUpState, formData: FormData): Promise<SignUpState> {
+  const firstName = String(formData.get("firstName") ?? "").trim();
+  const middleName = String(formData.get("middleName") ?? "").trim();
+  const lastName = String(formData.get("lastName") ?? "").trim();
+  const email = String(formData.get("email") ?? "").trim().toLowerCase();
+  const password = String(formData.get("password") ?? "");
+  const confirm = String(formData.get("confirm") ?? "");
+
+  if (!firstName || !lastName) return { error: "Enter your first and last name." };
+  if (firstName.length > 60 || lastName.length > 60 || middleName.length > 60)
+    return { error: "Names may not exceed 60 characters." };
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { error: "Enter a valid email address." };
+  if (password.length < 8) return { error: "Password must be at least 8 characters." };
+  if (password !== confirm) return { error: "Password and confirmation do not match." };
+
+  const existing = await db.user.findUnique({ where: { email }, select: { id: true } });
+  if (existing) {
+    return { error: "An account with this email already exists. Try signing in instead." };
+  }
+
+  const meta = await getRequestMeta();
+  const user = await db.user.create({
+    data: {
+      email,
+      firstName,
+      middleName: middleName || null,
+      lastName,
+      passwordHash: await hashPassword(password),
+      role: "MEMBER",
+      isActive: true,
+      lastLoginAt: new Date(),
+    },
+    select: { id: true, email: true },
+  });
+
+  await createSession(user.id, meta);
+  await writeAudit({
+    userId: user.id,
+    action: "USER_SIGNED_UP",
+    entityType: "User",
+    entityId: user.id,
+    entityLabel: user.email,
+    newState: { provider: "password", role: "MEMBER" },
+  });
+
+  redirect("/dashboard");
+}
+
 export type ChangePasswordState = { error?: string; success?: string };
 
 export async function changePassword(

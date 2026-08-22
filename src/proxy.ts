@@ -7,7 +7,13 @@ import type { NextRequest } from "next/server";
  * server action - never here alone.
  */
 
-const PUBLIC_PATHS = ["/login"];
+const PUBLIC_PATHS = [
+  "/login",
+  "/signup",
+  // Google OAuth round-trip must stay reachable while signed out.
+  "/api/auth/google/start",
+  "/api/auth/google/callback",
+];
 
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;

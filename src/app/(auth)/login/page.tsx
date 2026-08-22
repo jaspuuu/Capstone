@@ -1,28 +1,49 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { GraduationCap, Landmark, ShieldCheck } from "lucide-react";
+import { Alert } from "@/components/ui/alert";
 import { getSessionUser } from "@/lib/auth/session";
 import { LoginForm } from "./login-form";
 
 export const metadata: Metadata = { title: "Sign in" };
 
-const DEMO_ACCOUNTS = [
-  { role: "OSAS Administrator", email: "osas@lspu.edu.ph" },
-  { role: "SOA Administrator", email: "soa@lspu.edu.ph" },
-  { role: "College Dean", email: "dean.ccs@lspu.edu.ph" },
-  { role: "Regular Faculty Adviser", email: "adviser.regular@lspu.edu.ph" },
-  { role: "Part-Time Faculty Adviser", email: "adviser.parttime@lspu.edu.ph" },
-  { role: "Organization President", email: "president.acs@lspu.edu.ph" },
-  { role: "Organization Secretary", email: "secretary.jpia@lspu.edu.ph" },
-  { role: "Organization Member", email: "member1.acs@lspu.edu.ph" },
-];
+const GOOGLE_ERRORS: Record<string, string> = {
+  google_unconfigured:
+    "Google sign-in is not configured yet. Use your email and password, or contact the OSAS administrator.",
+  google_failed:
+    "Google sign-in failed or was cancelled. Try again or sign in with your email and password.",
+};
+
+function GoogleIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+      <path
+        fill="#4285F4"
+        d="M23.49 12.27c0-.79-.07-1.54-.19-2.27H12v4.51h6.47c-.29 1.48-1.14 2.73-2.4 3.58v3h3.86c2.26-2.09 3.56-5.17 3.56-8.82z"
+      />
+      <path
+        fill="#34A853"
+        d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.86-3c-1.08.72-2.45 1.16-4.07 1.16-3.13 0-5.78-2.11-6.73-4.96H1.29v3.09C3.26 21.3 7.31 24 12 24z"
+      />
+      <path
+        fill="#FBBC05"
+        d="M5.27 14.29c-.25-.72-.38-1.49-.38-2.29s.14-1.57.38-2.29V6.62H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.38l3.98-3.09z"
+      />
+      <path
+        fill="#EA4335"
+        d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.98 3.09C6.22 6.86 8.87 4.75 12 4.75z"
+      />
+    </svg>
+  );
+}
 
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ next?: string }>;
+  searchParams: Promise<{ next?: string; error?: string }>;
 }) {
-  const { next } = await searchParams;
+  const { next, error } = await searchParams;
 
   // Validated sign-in check: only redirect when the session is actually
   // alive (a stale cookie simply renders the form again).
@@ -108,31 +129,34 @@ export default async function LoginPage({
             Use your institutional credentials to continue.
           </p>
 
+          {error && GOOGLE_ERRORS[error] && (
+            <Alert tone="danger" className="mb-4">
+              {GOOGLE_ERRORS[error]}
+            </Alert>
+          )}
+
+          <a
+            href={`/api/auth/google/start${next ? `?next=${encodeURIComponent(next)}` : ""}`}
+            className="flex h-11 w-full items-center justify-center gap-2.5 rounded-lg border border-line-strong bg-surface text-sm font-semibold text-content shadow-sm transition-colors hover:border-primary hover:text-primary"
+          >
+            <GoogleIcon />
+            Continue with Google
+          </a>
+
+          <div className="my-5 flex items-center gap-3" aria-hidden>
+            <span className="h-px flex-1 bg-line" />
+            <span className="text-xs font-medium text-content-muted">or sign in with email</span>
+            <span className="h-px flex-1 bg-line" />
+          </div>
+
           <LoginForm next={next} />
 
-          <details className="group mt-8 rounded-xl border border-line bg-background open:bg-surface">
-            <summary className="cursor-pointer list-none px-4 py-3 text-xs font-semibold text-content-secondary transition-colors hover:text-primary">
-              Demo accounts (seeded data)
-              <span className="float-right group-open:hidden">+</span>
-              <span className="float-right hidden group-open:inline">−</span>
-            </summary>
-            <div className="border-t border-line px-4 py-3">
-              <p className="mb-2 text-[11px] text-content-muted">
-                Password for all seeded accounts:{" "}
-                <code className="rounded bg-surface-secondary px-1.5 py-0.5 font-mono text-[11px] font-semibold text-content">
-                  Password123!
-                </code>
-              </p>
-              <ul className="space-y-1.5">
-                {DEMO_ACCOUNTS.map((a) => (
-                  <li key={a.email} className="flex flex-wrap items-baseline justify-between gap-x-3 text-xs">
-                    <span className="font-medium text-content">{a.role}</span>
-                    <code className="text-content-secondary">{a.email}</code>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </details>
+          <p className="mt-8 border-t border-line pt-5 text-center text-sm text-content-secondary">
+            New to ORGanIZE?{" "}
+            <Link href="/signup" className="font-semibold text-primary hover:underline">
+              Create an account
+            </Link>
+          </p>
         </div>
       </div>
     </div>
