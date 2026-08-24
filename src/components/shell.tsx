@@ -6,6 +6,8 @@ import { usePathname } from "next/navigation";
 import { Bell, LogOut, Menu, Search, ShieldCheck, UserRound, X, Activity, Award, CalendarClock, CalendarDays, CalendarPlus, ChartColumn, ClipboardCheck, Files, LayoutDashboard, Landmark, ScrollText, School, Users } from "lucide-react";
 import type { NavIcon, NavSection } from "@/lib/nav";
 import { logout } from "@/lib/actions/auth";
+import { availableAcademicYears } from "@/lib/ay";
+import { YearPicker } from "@/components/year-picker";
 import { cn, initials } from "@/lib/utils";
 import { SHORT_ROLE_LABELS } from "@/lib/constants";
 import type { Role } from "@/generated/prisma/client";
@@ -63,11 +65,13 @@ export function Shell({
   user,
   nav,
   unreadNotifications = 0,
+  selectedAy,
   children,
 }: {
   user: ShellUser;
   nav: NavSection[];
   unreadNotifications?: number;
+  selectedAy?: string;
   children: React.ReactNode;
 }) {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -242,6 +246,7 @@ export function Shell({
                 View-only access
               </span>
             )}
+            {selectedAy && <YearPicker selectedAy={selectedAy} years={availableAcademicYears()} />}
             <Link
               href="/notifications"
               onClick={closeOverlays}

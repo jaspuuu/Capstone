@@ -8,8 +8,8 @@ export const ROLE_LABELS: Record<Role, string> = {
   OSAS: "OSAS Administrator",
   SOA: "SOA Administrator",
   DEAN: "College Dean",
-  ADVISER_REGULAR: "Regular Faculty Adviser",
-  ADVISER_PARTTIME: "Part-Time Faculty Adviser",
+  ADVISER_REGULAR: "Senior Adviser (Regular Faculty)",
+  ADVISER_PARTTIME: "Junior Adviser (Part-Time Faculty)",
   PRESIDENT: "Organization President",
   SECRETARY: "Organization Secretary",
   MEMBER: "Organization Member",
@@ -19,8 +19,8 @@ export const SHORT_ROLE_LABELS: Record<Role, string> = {
   OSAS: "OSAS",
   SOA: "SOA",
   DEAN: "Dean",
-  ADVISER_REGULAR: "Adviser (Regular)",
-  ADVISER_PARTTIME: "Adviser (Part-Time)",
+  ADVISER_REGULAR: "Senior Adviser",
+  ADVISER_PARTTIME: "Junior Adviser",
   PRESIDENT: "President",
   SECRETARY: "Secretary",
   MEMBER: "Member",
@@ -64,6 +64,25 @@ export const ORG_STATE_META: Record<string, StatusMeta> = {
   INACTIVE: { label: "Inactive", tone: "neutral" },
   REJECTED: { label: "Rejected", tone: "danger" },
   ACTIVE: { label: "Active", tone: "success" },
+};
+
+/** §17: distinct interview stage within the recognition review. */
+export const INTERVIEW_STATUS_META: Record<string, StatusMeta> = {
+  NOT_SCHEDULED: { label: "Not scheduled", tone: "neutral" },
+  SCHEDULED: { label: "Interview scheduled", tone: "warning" },
+  COMPLETED: { label: "Interview completed", tone: "info" },
+  FOR_ADDITIONAL_REVIEW: { label: "For additional review", tone: "orange" },
+  PASSED: { label: "Interview passed", tone: "success" },
+  NEEDS_REVISION: { label: "Needs revision", tone: "danger" },
+};
+
+/** §23: per-document lifecycle shown in the repository and progress bars. */
+export const REQUIREMENT_STATUS_META: Record<string, StatusMeta> = {
+  REQUIRED: { label: "Required", tone: "neutral" },
+  SUBMITTED: { label: "Submitted", tone: "info" },
+  UNDER_REVIEW: { label: "Under Review", tone: "warning" },
+  APPROVED: { label: "Approved", tone: "success" },
+  RETURNED: { label: "Returned", tone: "orange" },
 };
 
 export const PROPOSAL_STATUS_META: Record<string, StatusMeta> = {

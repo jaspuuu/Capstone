@@ -53,8 +53,8 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "audit.view",
     "analytics.view",
   ],
-  // SOA mirrors most administrative capabilities but not user/college
-  // administration or audit access; adjust here if OSAS delegates more.
+  // SOA mirrors most administrative capabilities (broad access like OSAS) but
+  // not user/college administration; OSAS remains the higher authority.
   SOA: [
     "org.view",
     "org.manage",
@@ -65,6 +65,7 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "deadline.manage",
     "activity.submit",
     "activity.approve",
+    "audit.view",
     "analytics.view",
   ],
   DEAN: [

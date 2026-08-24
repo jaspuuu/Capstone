@@ -4,6 +4,7 @@ import { ClipboardList, Plus } from "lucide-react";
 import { requireUser } from "@/lib/auth/guards";
 import { can, scopedOrgWhere } from "@/lib/auth/rbac";
 import { db } from "@/lib/db";
+import { getSelectedAy } from "@/lib/ay-server";
 import { REPORT_STATUS_META } from "@/lib/constants";
 import { formatDate } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -30,9 +31,11 @@ export default async function ReportsPage({
 }) {
   const user = await requireUser();
   const sp = await searchParams;
+  const ay = await getSelectedAy();
 
   const reports = await db.accomplishmentReport.findMany({
     where: {
+      academicYear: ay,
       organization: scopedOrgWhere(user),
       ...(sp.status ? { status: sp.status as never } : {}),
       ...(sp.q ? { title: { contains: sp.q, mode: "insensitive" as const } } : {}),

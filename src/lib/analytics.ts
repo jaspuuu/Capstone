@@ -151,7 +151,16 @@ export type RequirementItem = {
   key: RequirementKey;
   label: string;
   met: boolean;
+  /** §23 lifecycle of the document itself, derived from the application's stage. */
+  status: RequirementStatus;
 };
+
+export type RequirementStatus =
+  | "REQUIRED"
+  | "SUBMITTED"
+  | "UNDER_REVIEW"
+  | "APPROVED"
+  | "RETURNED";
 
 /**
  * The seven SF-001 accreditation requirements for one org in one AY.
@@ -162,7 +171,12 @@ export function requirementsChecklist(o: OrgSnapshot, ay: string): RequirementIt
   return checklistForYear(o.recognitions, o.requirementFiles, o.reports, ay);
 }
 
-/** Narrow-input variant used by the per-org document repository page. */
+/**
+ * Narrow-input variant used by the per-org document repository page and the
+ * renewal progress overview. The document's status follows the application
+ * it is attached to: submitted docs are Under Review while the application
+ * is being processed, Approved once it is recognized, Returned if it bounces.
+ */
 export function checklistForYear(
   recognitions: { academicYear: string; status: string }[],
   requirementFiles: { academicYear: string; kind: string | null }[],
@@ -175,16 +189,34 @@ export function checklistForYear(
   const tagged = new Set(
     requirementFiles.filter((f) => f.academicYear === ay).map((f) => f.kind)
   );
-  return REQUIREMENT_ORDER.map((key) => ({
-    key,
-    label: requirementLabel(key),
-    met:
+
+  const yearStatuses = new Set(
+    recognitions.filter((r) => r.academicYear === ay).map((r) => r.status)
+  );
+  const deriveStatus = (met: boolean): RequirementStatus => {
+    if (!met) return "REQUIRED";
+    if (yearStatuses.has("APPROVED") || yearStatuses.has("RECOGNIZED")) return "APPROVED";
+    if (yearStatuses.has("RETURNED")) return "RETURNED";
+    if (["SUBMITTED", "UNDER_REVIEW", "FOR_APPROVAL"].some((s) => yearStatuses.has(s))) {
+      return "UNDER_REVIEW";
+    }
+    return "SUBMITTED";
+  };
+
+  return REQUIREMENT_ORDER.map((key) => {
+    const met =
       key === APPLICATION_LETTER_KEY
         ? letterMet
         : tagged.has(key) ||
           (key === "ACCOMPLISHMENT_REPORTS" &&
-            reports.some((r) => r.academicYear === ay && FILED_REPORT.includes(r.status as never))),
-  }));
+            reports.some((r) => r.academicYear === ay && FILED_REPORT.includes(r.status as never)));
+    return {
+      key,
+      label: requirementLabel(key),
+      met,
+      status: deriveStatus(met),
+    };
+  });
 }
 
 export function compliancePct(items: RequirementItem[]): number {

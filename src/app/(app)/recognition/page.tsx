@@ -5,12 +5,45 @@ import { requireUser } from "@/lib/auth/guards";
 import { can, orgScopeWhere } from "@/lib/auth/rbac";
 import { db } from "@/lib/db";
 import { RECOGNITION_STATUS_META } from "@/lib/constants";
-import { currentAcademicYear, formatDateTime, fullName } from "@/lib/utils";
+import { checklistForYear } from "@/lib/analytics";
+import { getSelectedAy } from "@/lib/ay-server";
+import { formatDateTime, fullName } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { TableWrap, THead, TH, TR, TD } from "@/components/ui/table";
+
+/** §22: documents submitted vs the seven SF-001 requirements. */
+function ProgressCell({
+  rec,
+  kinds,
+}: {
+  rec: { id: string; academicYear: string; status: string };
+  kinds: Set<string>;
+}) {
+  const items = checklistForYear(
+    [{ academicYear: rec.academicYear, status: rec.status }],
+    [...kinds].map((kind) => ({ academicYear: rec.academicYear, kind })),
+    [],
+    rec.academicYear
+  );
+  const done = items.filter((i) => i.met).length;
+  const pct = Math.round((done / items.length) * 100);
+  return (
+    <div className="flex items-center gap-2" title={`${done} of ${items.length} SF-001 requirements submitted`}>
+      <div className="h-1.5 w-20 overflow-hidden rounded-full bg-surface-secondary">
+        <div
+          className={`h-full rounded-full ${pct === 100 ? "bg-green-600" : pct >= 50 ? "bg-gold" : "bg-danger"}`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <span className="text-xs tabular-nums text-content-secondary">
+        {done}/{items.length}
+      </span>
+    </div>
+  );
+}
 
 export const metadata: Metadata = { title: "Recognition & Renewal" };
 
@@ -23,9 +56,10 @@ export default async function RecognitionPage({
 }) {
   const user = await requireUser();
   const sp = await searchParams;
-  const ay = currentAcademicYear();
+  const ay = await getSelectedAy();
 
   const where = {
+    academicYear: ay,
     organization: orgScopeWhere(user),
     ...(sp.status ? { status: sp.status as never } : {}),
     ...(sp.kind ? { kind: sp.kind as never } : {}),
@@ -34,7 +68,7 @@ export default async function RecognitionPage({
       : {}),
   };
 
-  const [records, canSubmit] = await Promise.all([
+  const [records, canSubmit, taggedFiles] = await Promise.all([
     db.recognition.findMany({
       where,
       include: {
@@ -44,7 +78,18 @@ export default async function RecognitionPage({
       orderBy: [{ academicYear: "desc" }, { updatedAt: "desc" }],
     }),
     Promise.resolve(can(user, "recognition.submit")),
+    // §22 renewal progress: which requirement kinds each application already has.
+    db.attachment.findMany({
+      where: { entityType: "Recognition", kind: { not: null } },
+      select: { entityId: true, kind: true },
+    }),
   ]);
+
+  const kindsByRec = new Map<string, Set<string>>();
+  for (const f of taggedFiles) {
+    if (!kindsByRec.has(f.entityId)) kindsByRec.set(f.entityId, new Set());
+    if (f.kind) kindsByRec.get(f.entityId)!.add(f.kind);
+  }
 
   return (
     <>
@@ -157,6 +202,7 @@ export default async function RecognitionPage({
                 <TH>Academic year</TH>
                 <TH>Kind</TH>
                 <TH>Status</TH>
+                <TH>Documents</TH>
                 <TH>Submitted</TH>
                 <TH>Decided by</TH>
                 <TH />
@@ -182,6 +228,12 @@ export default async function RecognitionPage({
                       <Badge tone={RECOGNITION_STATUS_META[r.status].tone}>
                         {RECOGNITION_STATUS_META[r.status].label}
                       </Badge>
+                    </TD>
+                    <TD>
+                      <ProgressCell
+                        rec={{ id: r.id, academicYear: r.academicYear, status: r.status }}
+                        kinds={kindsByRec.get(r.id) ?? new Set()}
+                      />
                     </TD>
                     <TD className="text-xs whitespace-nowrap text-content-secondary">
                       {formatDateTime(r.submittedAt)}
@@ -218,6 +270,12 @@ export default async function RecognitionPage({
                   <p className="mt-1.5 text-xs text-content-muted">
                     AY {r.academicYear} · {r.kind === "RENEWAL" ? "Renewal" : "Initial"}
                   </p>
+                  <div className="mt-2">
+                    <ProgressCell
+                      rec={{ id: r.id, academicYear: r.academicYear, status: r.status }}
+                      kinds={kindsByRec.get(r.id) ?? new Set()}
+                    />
+                  </div>
                 </Link>
               </li>
             ))}

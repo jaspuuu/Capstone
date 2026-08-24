@@ -112,6 +112,8 @@ body {
 
 /* Flowing variant: grows with content (member rosters span multiple pages). */
 .sf-sheet-flow {
+  display: flex;
+  flex-direction: column;
   width: 210mm;
   margin: 3.5rem auto 2rem;
   padding: 11mm 25.4mm 12.7mm;
@@ -124,40 +126,46 @@ body {
 }
 
 /* Form-code footer pinned to the bottom of the sheet (mirrors the DOCX footer). */
-.sf-sheet .sf-footer {
+:is(.sf-sheet, .sf-sheet-flow) .sf-footer {
   margin-top: auto;
   padding-top: 6mm;
   font-family: Calibri, Carlito, "Segoe UI", sans-serif;
   font-size: 11pt;
 }
 
-.sf-sheet .sf-editable {
+:is(.sf-sheet, .sf-sheet-flow) .sf-editable {
   border-bottom: 1px solid #000;
   padding: 0 2mm;
   cursor: text;
   min-height: 1.2em;
 }
 
-.sf-sheet .sf-editable:focus {
+:is(.sf-sheet, .sf-sheet-flow) .sf-editable:focus {
   outline: 1px dashed var(--color-info);
   outline-offset: 1px;
 }
 
-.sf-sheet table.sf-table {
+/* SF-005 roster lines: tight ruled lines like the original form (~4.8mm pitch) */
+:is(.sf-sheet, .sf-sheet-flow) .sf-slot-lines .sf-editable {
+  min-height: 0;
+  line-height: 1.15;
+}
+
+:is(.sf-sheet, .sf-sheet-flow) table.sf-table {
   width: 100%;
   table-layout: fixed;
   border-collapse: collapse;
 }
 
-.sf-sheet table.sf-table th,
-.sf-sheet table.sf-table td {
+:is(.sf-sheet, .sf-sheet-flow) table.sf-table th,
+:is(.sf-sheet, .sf-sheet-flow) table.sf-table td {
   border: 1px solid #000;
   vertical-align: top;
   overflow-wrap: normal;
   word-break: keep-all;
 }
 
-.sf-sheet table.sf-table th {
+:is(.sf-sheet, .sf-sheet-flow) table.sf-table th {
   font-weight: normal;
   text-align: center;
   padding: 1.5mm 0.5mm;
@@ -165,12 +173,12 @@ body {
 
 /* Body cells are plain text in the original form - never bold, words intact.
    Font size inherits from the sheet (Times New Roman 14pt). */
-.sf-sheet table.sf-table td {
+:is(.sf-sheet, .sf-sheet-flow) table.sf-table td {
   font-weight: normal;
   padding: 1mm;
 }
 
-.sf-sheet table.sf-table td .sf-editable {
+:is(.sf-sheet, .sf-sheet-flow) table.sf-table td .sf-editable {
   font-weight: inherit;
 }
 

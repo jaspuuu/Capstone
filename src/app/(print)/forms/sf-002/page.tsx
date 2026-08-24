@@ -7,6 +7,7 @@ import { canUseOrgForm } from "@/lib/forms-access";
 import { Editable, PrintToolbar } from "@/components/forms/editable";
 import { SfApprovers, SfDateBlank, SfFooter, SfLetterhead, SfSig } from "@/components/forms/sf-chrome";
 import { FormOrgPicker } from "@/components/forms/org-picker";
+import { SignatureRouteSection } from "@/components/forms/signature-route-section";
 import { getApproversSignatures, getSignaturesFor } from "@/lib/signatures";
 
 export const metadata: Metadata = { title: "SF-002 · Organization Renewal Form" };
@@ -62,6 +63,15 @@ export default async function Sf002Page({
     <>
       <PrintToolbar backHref={`/organizations/${org.id}`} title="SF-002 Organization Renewal Form" />
 
+      <div className="mx-auto mb-4 mt-2 max-w-[210mm] px-4 print:hidden">
+        <SignatureRouteSection
+          formKey="SF002"
+          orgId={org.id}
+          ay={ay}
+          title={`SF-002 · ${orgDisplay}`}
+        />
+      </div>
+
       <div className="sf-sheet">
         <SfLetterhead />
 
@@ -72,10 +82,10 @@ export default async function Sf002Page({
         <div className="mt-4">
           <p className="font-bold">THE DIRECTOR/CHAIRPERSON</p>
           <p className="font-bold">OFFICE OF STUDENT AFFAIRS AND SERVICES</p>
-          <p>LSPU</p>
+          <p className="font-bold">LSPU</p>
         </div>
 
-        <p className="mt-4 indent-10">Thru: The Coordinator, Student Organization Unit</p>
+        <p className="mt-4 indent-10 font-bold">Thru: The Coordinator, Student Organization Unit</p>
 
         <p className="mt-4">Sir/Madam:</p>
 

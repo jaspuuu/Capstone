@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/auth/guards";
 import { can } from "@/lib/auth/rbac";
 import { db } from "@/lib/db";
 import { NAV_SECTIONS } from "@/lib/nav";
+import { getSelectedAy } from "@/lib/ay-server";
 import { Shell } from "@/components/shell";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
@@ -12,7 +13,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // can be used.
   if (user.mustChangePassword) redirect("/change-password");
 
-  const [nav, unreadNotifications] = await Promise.all([
+  const [nav, unreadNotifications, selectedAy] = await Promise.all([
     Promise.resolve(
       NAV_SECTIONS.map((section) => ({
         ...section,
@@ -20,6 +21,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       })).filter((section) => section.items.length > 0)
     ),
     db.notification.count({ where: { userId: user.id, readAt: null } }),
+    getSelectedAy(),
   ]);
 
   return (
@@ -33,6 +35,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       }}
       nav={nav}
       unreadNotifications={unreadNotifications}
+      selectedAy={selectedAy}
     >
       {children}
     </Shell>

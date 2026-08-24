@@ -19,12 +19,14 @@ export const Editable = memo(function Editable({
   block = false,
   center = false,
   ariaLabel,
+  className,
 }: {
   initial?: string;
   minWidth?: string;
   block?: boolean;
   center?: boolean;
   ariaLabel?: string;
+  className?: string;
 }) {
   return (
     <span
@@ -36,7 +38,7 @@ export const Editable = memo(function Editable({
       aria-label={ariaLabel ?? "Editable form field"}
       className={`sf-editable ${block ? "block" : "inline-block"} ${
         center ? "text-center" : ""
-      }`}
+      } ${className ?? ""}`}
       style={minWidth ? { minWidth } : undefined}
     />
   );

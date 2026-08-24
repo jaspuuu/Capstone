@@ -158,12 +158,12 @@ async function main() {
     update: {},
     create: { name: "College of Business Administration", code: "CBA" },
   });
-  const coed = await prisma.college.upsert({
+  await prisma.college.upsert({
     where: { code: "COEd" },
     update: {},
     create: { name: "College of Education", code: "COEd" },
   });
-  const cas = await prisma.college.upsert({
+  await prisma.college.upsert({
     where: { code: "CAS" },
     update: {},
     create: { name: "College of Arts and Sciences", code: "CAS" },
@@ -174,7 +174,7 @@ async function main() {
     create: { name: "College of Nursing", code: "CON" },
   });
 
-  const itDept = await prisma.department.upsert({
+  await prisma.department.upsert({
     where: { code: "IT" },
     update: {},
     create: { name: "Information Technology", code: "IT", collegeId: ccs.id },
@@ -189,13 +189,36 @@ async function main() {
     update: {},
     create: { name: "Electrical Engineering", code: "EE", collegeId: coe.id },
   });
-  const acctgDept = await prisma.department.upsert({
+  await prisma.department.upsert({
     where: { code: "ACCTG" },
     update: {},
     create: { name: "Accountancy", code: "ACCTG", collegeId: cba.id },
   });
 
+  // College hosting the hospitality-management mother organization.
+  const ofhmCollege = await prisma.college.upsert({
+    where: { code: "OFHM" },
+    update: {},
+    create: { name: "Organization of Future Hospitality Managers", code: "OFHM" },
+  });
+
+  // ------------------------------------------- Remove placeholder mock orgs
+  // Previous demo dataset — replaced by the CCS-SBO/OFHM/CBAA-SBO hierarchy
+  // below. All child records cascade with the organization row.
+  for (const acronym of ["ESC", "PSME", "IECEP", "ACS", "JPIA", "PSYCH", "FEO"]) {
+    const old = await prisma.organization.findFirst({ where: { acronym }, select: { id: true } });
+    if (!old) continue;
+    const recIds = (
+      await prisma.recognition.findMany({ where: { organizationId: old.id }, select: { id: true } })
+    ).map((r) => r.id);
+    if (recIds.length) {
+      await prisma.attachment.deleteMany({ where: { entityType: "Recognition", entityId: { in: recIds } } });
+    }
+    await prisma.organization.delete({ where: { id: old.id } });
+  }
+
   // ------------------------------------------------------- Organizations
+  // Demo hierarchy: three mother orgs; CCS-SBO has two sub-organizations.
   // Idempotent by acronym lookup.
   const mkOrg = async (
     acronym: string,
@@ -206,79 +229,63 @@ async function main() {
     return prisma.organization.create({ data: { acronym, ...data } });
   };
 
-  const esc = await mkOrg("ESC", {
-    name: "Engineering Student Council",
+  const ccsSbo = await mkOrg("CCS-SBO", {
+    name: "CCS Student Body Organization",
     description:
-      "The mother organization of all engineering-based student organizations, coordinating college-wide activities.",
+      "The mother organization of all College of Computer Studies student organizations, coordinating college-wide activities.",
     type: "MOTHER",
-    collegeId: coe.id,
+    collegeId: ccs.id,
     foundedYear: 1998,
   });
-  await mkOrg("PSME", {
-    name: "Philippine Society of Mechanical Engineers – LSPU Chapter",
-    description: "Student chapter of PSME for mechanical engineering students.",
-    type: "CHILD",
-    parentId: esc.id,
-    collegeId: coe.id,
-    foundedYear: 2004,
-  });
-  await mkOrg("IECEP", {
-    name: "Institute of Electronics Engineers of the Philippines – Student Chapter",
-    description: "Student chapter of IECEP for electronics engineering students.",
-    type: "CHILD",
-    parentId: esc.id,
-    collegeId: coe.id,
-    foundedYear: 2007,
-  });
-  const acs = await mkOrg("ACS", {
-    name: "Association of Computing Students",
+  const ofhm = await mkOrg("OFHM", {
+    name: "Organization of Future Hospitality Managers",
     description:
-      "The premier student organization for Information Technology and Computer Science students of CCS.",
-    type: "INDEPENDENT",
-    collegeId: ccs.id,
-    departmentId: itDept.id,
-    foundedYear: 2001,
+      "Mother organization for hospitality-management student organizations under OFHM.",
+    type: "MOTHER",
+    collegeId: ofhmCollege.id,
+    foundedYear: 2005,
   });
-  const jpia = await mkOrg("JPIA", {
-    name: "Junior Philippine Institute of Accountants – LSPU Chapter",
-    description: "Official student organization of Accountancy students.",
-    type: "INDEPENDENT",
+  const cbaaSbo = await mkOrg("CBAA-SBO", {
+    name: "CBAA Student Body Organization",
+    description:
+      "The mother organization of all College of Business Administration and Accountancy student organizations.",
+    type: "MOTHER",
     collegeId: cba.id,
-    departmentId: acctgDept.id,
     foundedYear: 1995,
   });
-  const psych = await mkOrg("PSYCH", {
-    name: "Psychology Society",
-    description: "Academic organization for BS Psychology students.",
-    type: "INDEPENDENT",
-    collegeId: cas.id,
-    foundedYear: 2010,
+  const graphicos = await mkOrg("GRAPHICOS", {
+    name: "Graphicos",
+    description:
+      "Sub-organization of CCS-SBO for design, multimedia, and visual computing enthusiasts.",
+    type: "CHILD",
+    parentId: ccsSbo.id,
+    collegeId: ccs.id,
+    foundedYear: 2012,
   });
-  // An org whose recognition lapsed — demonstrates EXPIRED state.
-  const feo = await mkOrg("FEO", {
-    name: "Future Educators Organization",
-    description: "Organization of pre-service teachers.",
-    type: "INDEPENDENT",
-    collegeId: coed.id,
-    foundedYear: 2003,
+  const robotics = await mkOrg("ROBOTICS", {
+    name: "Robotics",
+    description:
+      "Sub-organization of CCS-SBO focused on robotics, embedded systems, and automation projects.",
+    type: "CHILD",
+    parentId: ccsSbo.id,
+    collegeId: ccs.id,
+    foundedYear: 2016,
   });
 
   // ------------------------------------------------- Members & advisers
   await prisma.organizationMember.createMany({
     data: [
-      { organizationId: acs.id, userId: presidentAcs.id, position: "PRESIDENT", academicYear: AY_CUR },
-      { organizationId: acs.id, userId: member1.id, position: "MEMBER", academicYear: AY_CUR },
-      { organizationId: jpia.id, userId: secretaryJpia.id, position: "SECRETARY", academicYear: AY_CUR },
+      { organizationId: ccsSbo.id, userId: presidentAcs.id, position: "PRESIDENT", academicYear: AY_CUR },
+      { organizationId: robotics.id, userId: member1.id, position: "MEMBER", academicYear: AY_CUR },
+      { organizationId: graphicos.id, userId: secretaryJpia.id, position: "SECRETARY", academicYear: AY_CUR },
     ],
     skipDuplicates: true,
   });
 
   await prisma.adviserAssignment.createMany({
     data: [
-      { organizationId: acs.id, adviserId: adviserRegular.id, type: "REGULAR", academicYear: AY_CUR },
-      { organizationId: jpia.id, adviserId: adviserRegular.id, type: "REGULAR", academicYear: AY_CUR },
-      { organizationId: psych.id, adviserId: adviserParttime.id, type: "PART_TIME", academicYear: AY_CUR },
-      { organizationId: esc.id, adviserId: adviserRegular.id, type: "REGULAR", academicYear: AY_CUR },
+      { organizationId: ccsSbo.id, adviserId: adviserRegular.id, type: "REGULAR", academicYear: AY_CUR },
+      { organizationId: graphicos.id, adviserId: adviserParttime.id, type: "PART_TIME", academicYear: AY_CUR },
     ],
     skipDuplicates: true,
   });
@@ -329,51 +336,19 @@ async function main() {
     await prisma.recognitionEvent.createMany({ data: events });
   };
 
-  // Previous AY history
-  await decidedHistory(acs.id, AY_PREV, "INITIAL", "RECOGNIZED");
-  await decidedHistory(jpia.id, AY_PREV, "INITIAL", "RECOGNIZED");
-  await decidedHistory(psych.id, AY_PREV, "INITIAL", "RECOGNIZED");
-  await decidedHistory(feo.id, AY_PREV, "INITIAL", "REJECTED");
+  // Previous AY history — every demo organization is an established one.
+  await decidedHistory(ccsSbo.id, AY_PREV, "INITIAL", "RECOGNIZED");
+  await decidedHistory(ofhm.id, AY_PREV, "INITIAL", "RECOGNIZED");
+  await decidedHistory(cbaaSbo.id, AY_PREV, "RENEWAL", "RECOGNIZED");
+  await decidedHistory(graphicos.id, AY_PREV, "INITIAL", "RECOGNIZED");
+  await decidedHistory(robotics.id, AY_PREV, "INITIAL", "RECOGNIZED");
 
-  // Current AY pipeline in various stages
-  const now = new Date();
-  const daysAgo = (n: number) => new Date(now.getTime() - n * 86_400_000);
-
-  const pipeline = async (
-    orgId: string,
-    status: "SUBMITTED" | "UNDER_REVIEW" | "FOR_APPROVAL" | "DRAFT",
-    kind: "INITIAL" | "RENEWAL",
-  ) => {
-    const rec = await prisma.recognition.create({
-      data: {
-        organizationId: orgId,
-        academicYear: AY_CUR,
-        kind,
-        status,
-        submittedAt: status !== "DRAFT" ? daysAgo(4) : null,
-        reviewedAt: status === "UNDER_REVIEW" || status === "FOR_APPROVAL" ? daysAgo(2) : null,
-        decidedById: status === "FOR_APPROVAL" ? deanCcs.id : null,
-      },
-    });
-    const events: EventInput[] = [
-      { recognitionId: rec.id, actorId: presidentAcs.id, action: "CREATED", toStatus: "DRAFT", createdAt: daysAgo(5) },
-    ];
-    if (status !== "DRAFT") {
-      events.push({ recognitionId: rec.id, actorId: presidentAcs.id, action: "SUBMITTED", fromStatus: "DRAFT", toStatus: "SUBMITTED", createdAt: daysAgo(4) });
-    }
-    if (status === "UNDER_REVIEW" || status === "FOR_APPROVAL") {
-      events.push({ recognitionId: rec.id, actorId: deanCcs.id, action: "STARTED_REVIEW", fromStatus: "SUBMITTED", toStatus: "UNDER_REVIEW", createdAt: daysAgo(2) });
-    }
-    if (status === "FOR_APPROVAL") {
-      events.push({ recognitionId: rec.id, actorId: deanCcs.id, action: "ENDORSED", fromStatus: "UNDER_REVIEW", toStatus: "FOR_APPROVAL", note: "All documents in order.", createdAt: daysAgo(1) });
-    }
-    await prisma.recognitionEvent.createMany({ data: events });
-  };
-
-  await pipeline(jpia.id, "SUBMITTED", "RENEWAL");
-  await pipeline(acs.id, "UNDER_REVIEW", "RENEWAL");
-  await pipeline(psych.id, "FOR_APPROVAL", "RENEWAL");
-  await pipeline(esc.id, "DRAFT", "RENEWAL");
+  // Current AY — renewed and fully recognized.
+  await decidedHistory(ccsSbo.id, AY_CUR, "RENEWAL", "RECOGNIZED");
+  await decidedHistory(ofhm.id, AY_CUR, "RENEWAL", "RECOGNIZED");
+  await decidedHistory(cbaaSbo.id, AY_CUR, "RENEWAL", "RECOGNIZED");
+  await decidedHistory(graphicos.id, AY_CUR, "RENEWAL", "RECOGNIZED");
+  await decidedHistory(robotics.id, AY_CUR, "RENEWAL", "RECOGNIZED");
   } else {
     console.log("Recognitions for AY %s already present — skipping lifecycle seed.", AY_CUR);
   }
@@ -439,7 +414,7 @@ async function main() {
     // 1) Fully processed proposal + accepted report -> COMPLETED.
     const assembly = await prisma.activityProposal.create({
       data: {
-        organizationId: acs.id,
+        organizationId: ccsSbo.id,
         title: "General Assembly and Team Building",
         description:
           "Annual general assembly to present the organization's program of activities, followed by a team-building session for members.",
@@ -458,7 +433,7 @@ async function main() {
     });
     await prisma.auditLog.createMany({
       data: [
-        { userId: presidentAcs.id, action: "ACTIVITY_CREATED", entityType: "ActivityProposal", entityId: assembly.id, entityLabel: assembly.title, newState: { organizationId: acs.id, scope: "ORGANIZATION", status: "DRAFT" }, createdAt: daysAgo(40), ipAddress: "127.0.0.1" },
+        { userId: presidentAcs.id, action: "ACTIVITY_CREATED", entityType: "ActivityProposal", entityId: assembly.id, entityLabel: assembly.title, newState: { organizationId: ccsSbo.id, scope: "ORGANIZATION", status: "DRAFT" }, createdAt: daysAgo(40), ipAddress: "127.0.0.1" },
         { userId: presidentAcs.id, action: "ACTIVITY_SUBMITTED", entityType: "ActivityProposal", entityId: assembly.id, entityLabel: assembly.title, newState: { status: "SUBMITTED" }, createdAt: daysAgo(38), ipAddress: "127.0.0.1" },
         { userId: adviserRegular.id, action: "ACTIVITY_ENDORSED", entityType: "ActivityProposal", entityId: assembly.id, entityLabel: assembly.title, newState: { status: "ENDORSED" }, createdAt: daysAgo(36), ipAddress: "127.0.0.1" },
         { userId: deanCcs.id, action: "ACTIVITY_APPROVED", entityType: "ActivityProposal", entityId: assembly.id, entityLabel: assembly.title, newState: { status: "APPROVED" }, createdAt: daysAgo(35), ipAddress: "127.0.0.1" },
@@ -467,7 +442,7 @@ async function main() {
 
     const assemblyReport = await prisma.accomplishmentReport.create({
       data: {
-        organizationId: acs.id,
+        organizationId: ccsSbo.id,
         activityProposalId: assembly.id,
         title: "Accomplishment Report — General Assembly and Team Building",
         narrative:
@@ -484,7 +459,7 @@ async function main() {
     });
     await prisma.auditLog.createMany({
       data: [
-        { userId: presidentAcs.id, action: "REPORT_CREATED", entityType: "AccomplishmentReport", entityId: assemblyReport.id, entityLabel: assemblyReport.title, newState: { organizationId: acs.id, status: "DRAFT" }, createdAt: daysAgo(24), ipAddress: "127.0.0.1" },
+        { userId: presidentAcs.id, action: "REPORT_CREATED", entityType: "AccomplishmentReport", entityId: assemblyReport.id, entityLabel: assemblyReport.title, newState: { organizationId: ccsSbo.id, status: "DRAFT" }, createdAt: daysAgo(24), ipAddress: "127.0.0.1" },
         { userId: presidentAcs.id, action: "REPORT_SUBMITTED", entityType: "AccomplishmentReport", entityId: assemblyReport.id, entityLabel: assemblyReport.title, newState: { status: "SUBMITTED" }, createdAt: daysAgo(23), ipAddress: "127.0.0.1" },
         { userId: osas.id, action: "REPORT_ACCEPTED", entityType: "AccomplishmentReport", entityId: assemblyReport.id, entityLabel: assemblyReport.title, newState: { status: "ACCEPTED" }, createdAt: daysAgo(22), ipAddress: "127.0.0.1" },
         { userId: osas.id, action: "ACTIVITY_COMPLETED", entityType: "ActivityProposal", entityId: assembly.id, entityLabel: assembly.title, newState: { status: "COMPLETED", viaReportId: assemblyReport.id }, createdAt: daysAgo(22), ipAddress: "127.0.0.1" },
@@ -494,10 +469,10 @@ async function main() {
     // 2) Submitted proposal awaiting endorsement.
     const seminar = await prisma.activityProposal.create({
       data: {
-        organizationId: jpia.id,
-        title: "Seminar on Ethical Accounting Practice",
+        organizationId: graphicos.id,
+        title: "Digital Design Bootcamp",
         description:
-          "Half-day seminar featuring a guest CPA speaker on ethics in professional practice, open to accountancy students college-wide.",
+          "Half-day workshop on brand and layout design fundamentals, open to CCS students college-wide.",
         venue: "LSPU Auditorium",
         startAt: daysAhead(14),
         endAt: daysAhead(14),
@@ -511,7 +486,7 @@ async function main() {
     });
     await prisma.auditLog.createMany({
       data: [
-        { userId: secretaryJpia.id, action: "ACTIVITY_CREATED", entityType: "ActivityProposal", entityId: seminar.id, entityLabel: seminar.title, newState: { organizationId: jpia.id, scope: "COLLEGE", status: "DRAFT" }, createdAt: daysAgo(3), ipAddress: "127.0.0.1" },
+        { userId: secretaryJpia.id, action: "ACTIVITY_CREATED", entityType: "ActivityProposal", entityId: seminar.id, entityLabel: seminar.title, newState: { organizationId: graphicos.id, scope: "COLLEGE", status: "DRAFT" }, createdAt: daysAgo(3), ipAddress: "127.0.0.1" },
         { userId: secretaryJpia.id, action: "ACTIVITY_SUBMITTED", entityType: "ActivityProposal", entityId: seminar.id, entityLabel: seminar.title, newState: { status: "SUBMITTED" }, createdAt: daysAgo(2), ipAddress: "127.0.0.1" },
       ],
     });
@@ -519,10 +494,10 @@ async function main() {
     // 3) Draft proposal not yet submitted.
     const outreach = await prisma.activityProposal.create({
       data: {
-        organizationId: acs.id,
-        title: "Community Outreach Program",
+        organizationId: robotics.id,
+        title: "Robotics Community Outreach",
         description:
-          "University-wide outreach: computer literacy training for senior high school students of partner schools.",
+          "University-wide outreach: introductory robotics and programming workshops for senior high school students of partner schools.",
         venue: "Partner School Campus",
         startAt: daysAhead(30),
         endAt: daysAhead(31),
@@ -535,12 +510,12 @@ async function main() {
     });
     await prisma.auditLog.create({
       data: {
-        userId: presidentAcs.id,
+        userId: member1.id,
         action: "ACTIVITY_CREATED",
         entityType: "ActivityProposal",
         entityId: outreach.id,
         entityLabel: outreach.title,
-        newState: { organizationId: acs.id, scope: "UNIVERSITY", status: "DRAFT" },
+        newState: { organizationId: robotics.id, scope: "UNIVERSITY", status: "DRAFT" },
         createdAt: daysAgo(1),
         ipAddress: "127.0.0.1",
       },
@@ -552,13 +527,13 @@ async function main() {
   // ------------------------------------------------------- Attachments
   const attachmentCount = await prisma.attachment.count();
   if (attachmentCount === 0) {
-    const acsRec = await prisma.recognition.findFirst({
-      where: { organizationId: acs.id, academicYear: AY_CUR },
+    const ccsSboRec = await prisma.recognition.findFirst({
+      where: { organizationId: ccsSbo.id, academicYear: AY_CUR },
     });
-    const jpiaRec = await prisma.recognition.findFirst({
-      where: { organizationId: jpia.id, academicYear: AY_CUR },
+    const graphicosRec = await prisma.recognition.findFirst({
+      where: { organizationId: graphicos.id, academicYear: AY_CUR },
     });
-    if ((acsRec || jpiaRec) && presidentAcs) {
+    if ((ccsSboRec || graphicosRec) && presidentAcs) {
       // 1x1 PNG so each demo file is valid and renders inline.
       const png = Buffer.from(
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
@@ -567,13 +542,13 @@ async function main() {
       const dir = path.join(process.cwd(), "storage", "uploads");
       await mkdir(dir, { recursive: true });
 
-      // Tagged SF-001 checklist samples: ACS near-complete, JPIA starting out.
+      // Tagged SF-001 checklist samples: CCS-SBO near-complete, Graphicos starting out.
       const samples: {
         recognitionId: string;
         kind: string;
         fileName: string;
       }[] = [];
-      if (acsRec) {
+      if (ccsSboRec) {
         for (const kind of [
           "CONSTITUTION",
           "PLAN_OF_ACTIVITIES",
@@ -581,11 +556,11 @@ async function main() {
           "CERTIFICATION",
           "FINANCIAL_REPORT",
         ]) {
-          samples.push({ recognitionId: acsRec.id, kind, fileName: `acs-${kind.toLowerCase()}.png` });
+          samples.push({ recognitionId: ccsSboRec.id, kind, fileName: `ccs-sbo-${kind.toLowerCase()}.png` });
         }
       }
-      if (jpiaRec) {
-        samples.push({ recognitionId: jpiaRec.id, kind: "CONSTITUTION", fileName: "jpia-constitution.png" });
+      if (graphicosRec) {
+        samples.push({ recognitionId: graphicosRec.id, kind: "CONSTITUTION", fileName: "graphicos-constitution.png" });
       }
 
       for (const s of samples) {

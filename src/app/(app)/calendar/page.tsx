@@ -329,11 +329,17 @@ export default async function CalendarPage({
                         <Link
                           key={e.id}
                           href={`/activities/${e.id}`}
-                          className="flex items-center gap-1 rounded px-1 py-0.5 text-[11px] leading-tight text-content hover:bg-primary-light"
+                          className="block rounded px-1 py-0.5 text-[11px] leading-tight text-content hover:bg-primary-light"
                         >
-                          <span className={`size-1.5 shrink-0 rounded-full ${DOT[e.status] ?? "bg-content-muted"}`} aria-hidden />
-                          <span className="truncate">
-                            {e.orgLabel} · {e.title}
+                          <span className="flex items-center gap-1">
+                            <span className={`size-1.5 shrink-0 rounded-full ${DOT[e.status] ?? "bg-content-muted"}`} aria-hidden />
+                            <span className="truncate">
+                              {e.orgLabel} · {e.title}
+                            </span>
+                          </span>
+                          <span className="block truncate pl-2.5 text-[10px] text-content-secondary">
+                            {fmtTime(e.startAt)} – {fmtTime(e.endAt)}
+                            {e.venue ? ` · ${e.venue}` : ""}
                           </span>
                         </Link>
                       ))}
@@ -430,7 +436,7 @@ function EventChip({ event: e, conflict }: { event: CalEvent; conflict: boolean 
         {conflict && <TriangleAlert className="size-3 shrink-0 text-warning" aria-hidden />}
       </span>
       <span className="mt-0.5 block truncate text-[10px] text-content-secondary">
-        {fmtTime(e.startAt)}
+        {fmtTime(e.startAt)} – {fmtTime(e.endAt)}
         {e.venue ? ` · ${e.venue}` : ""}
       </span>
     </Link>

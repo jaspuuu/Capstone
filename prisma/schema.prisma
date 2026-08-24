@@ -27,49 +27,54 @@ enum Role {
 }
 
 model User {
-  id            String    @id @default(cuid())
-  email         String    @unique
-  passwordHash  String
-  firstName     String
-  lastName      String
-  middleName    String?
-  role          Role
+  id                 String      @id @default(cuid())
+  email              String      @unique
+  passwordHash       String
+  firstName          String
+  lastName           String
+  middleName         String?
+  role               Role
   // Administrative scope (OSAS/SOA may be campus-wide; Dean scoped to college)
-  collegeId     String?
-  college       College?  @relation("UserCollege", fields: [collegeId], references: [id])
-  departmentId  String?
-  department    Department? @relation("UserDepartment", fields: [departmentId], references: [id])
-  studentNumber String?   @unique
-  positionTitle String?
-  isActive      Boolean   @default(true)
-  isViewOnly    Boolean   @default(false)
+  collegeId          String?
+  college            College?    @relation("UserCollege", fields: [collegeId], references: [id])
+  departmentId       String?
+  department         Department? @relation("UserDepartment", fields: [departmentId], references: [id])
+  studentNumber      String?     @unique
+  positionTitle      String?
+  isActive           Boolean     @default(true)
+  isViewOnly         Boolean     @default(false)
   // Set when an admin issues a temporary password; the user must change it
   // before they can use the system.
-  mustChangePassword Boolean @default(false)
-  lastLoginAt   DateTime?
+  mustChangePassword Boolean     @default(false)
+  lastLoginAt        DateTime?
   // Saved e-signature (drawn, uploaded, or typed). At most one of image/typed
   // is set; method records which input produced it. Null = no signature yet.
-  signatureImage  String?
-  signatureTyped  String?
-  signatureMethod String?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  signatureImage     String?
+  signatureTyped     String?
+  signatureMethod    String?
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
 
-  sessions           Session[]
-  memberships        OrganizationMember[]
-  adviserAssignments AdviserAssignment[]
-  deanOfColleges     College[]            @relation("CollegeDean")
-  auditLogs          AuditLog[]
-  recognitionEvents  RecognitionEvent[]   @relation("RecognitionEventActor")
-  decidedRecognitions Recognition[]       @relation("RecognitionDecidedBy")
-  decidedProposals   ActivityProposal[]   @relation("ProposalDecidedBy")
-  decidedReports     AccomplishmentReport[] @relation("ReportDecidedBy")
-  createdDeadlines   Deadline[]           @relation("DeadlineCreator")
-  uploadedAttachments Attachment[]        @relation("AttachmentUploader")
-  notifications       Notification[]      @relation("NotificationRecipient")
-  attendanceRecords   ActivityAttendance[] @relation("ActivityAttendanceUser")
-  recordedAttendance  ActivityAttendance[] @relation("ActivityAttendanceRecorder")
-  createdCheckIns     ActivityCheckIn[]    @relation("CheckInCreator")
+  sessions               Session[]
+  memberships            OrganizationMember[]
+  adviserAssignments     AdviserAssignment[]
+  deanOfColleges         College[]              @relation("CollegeDean")
+  auditLogs              AuditLog[]
+  recognitionEvents      RecognitionEvent[]     @relation("RecognitionEventActor")
+  decidedRecognitions    Recognition[]          @relation("RecognitionDecidedBy")
+  decidedProposals       ActivityProposal[]     @relation("ProposalDecidedBy")
+  decidedReports         AccomplishmentReport[] @relation("ReportDecidedBy")
+  createdDeadlines       Deadline[]             @relation("DeadlineCreator")
+  uploadedAttachments    Attachment[]           @relation("AttachmentUploader")
+  notifications          Notification[]         @relation("NotificationRecipient")
+  attendanceRecords      ActivityAttendance[]   @relation("ActivityAttendanceUser")
+  recordedAttendance     ActivityAttendance[]   @relation("ActivityAttendanceRecorder")
+  createdCheckIns        ActivityCheckIn[]      @relation("CheckInCreator")
+  decidedMemberships     OrganizationMember[]   @relation("MembershipDecidedBy")
+  endedAdviserTerms      AdviserAssignment[]    @relation("AdviserAssignmentEnder")
+  createdSignatureRoutes SignatureRoute[]       @relation("SignatureRouteCreator")
+  signatureSteps         SignatureStep[]        @relation("SignatureStepSigner")
+  actedSignatureSteps    SignatureStep[]        @relation("SignatureStepActor")
 
   @@index([role])
   @@index([collegeId])
@@ -143,29 +148,39 @@ enum MemberPosition {
   MEMBER
 }
 
+// Membership approval lifecycle: students apply, the organization decides.
+// Existing/seeded rows default to APPROVED so history stays valid.
+enum MembershipStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 enum AdviserType {
   REGULAR
   PART_TIME
 }
 
 model Organization {
-  id          String    @id @default(cuid())
-  name        String
-  acronym     String?
-  description String?
-  type        OrgType   @default(INDEPENDENT)
-  parentId    String?
-  parent      Organization?  @relation("OrgHierarchy", fields: [parentId], references: [id])
-  children    Organization[] @relation("OrgHierarchy")
-  collegeId   String
-  college     College   @relation(fields: [collegeId], references: [id])
-  departmentId String?
-  department  Department? @relation(fields: [departmentId], references: [id])
-  status      OrgStatus @default(ACTIVE)
-  foundedYear Int?
-  archivedAt  DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id             String         @id @default(cuid())
+  name           String
+  acronym        String?
+  description    String?
+  type           OrgType        @default(INDEPENDENT)
+  parentId       String?
+  parent         Organization?  @relation("OrgHierarchy", fields: [parentId], references: [id])
+  children       Organization[] @relation("OrgHierarchy")
+  collegeId      String
+  college        College        @relation(fields: [collegeId], references: [id])
+  departmentId   String?
+  department     Department?    @relation(fields: [departmentId], references: [id])
+  status         OrgStatus      @default(ACTIVE)
+  foundedYear    Int?
+  // Organization-uploaded identity asset (file in storage/uploads).
+  logoStoredName String?
+  archivedAt     DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
 
   advisers     AdviserAssignment[]
   members      OrganizationMember[]
@@ -179,15 +194,19 @@ model Organization {
 }
 
 model OrganizationMember {
-  id             String         @id @default(cuid())
+  id             String           @id @default(cuid())
   organizationId String
-  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   userId         String
-  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  position       MemberPosition @default(MEMBER)
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  position       MemberPosition   @default(MEMBER)
+  status         MembershipStatus @default(APPROVED)
   academicYear   String
-  isCurrent      Boolean        @default(true)
-  joinedAt       DateTime       @default(now())
+  isCurrent      Boolean          @default(true)
+  joinedAt       DateTime         @default(now())
+  decidedAt      DateTime?
+  decidedById    String?
+  decidedBy      User?            @relation("MembershipDecidedBy", fields: [decidedById], references: [id])
 
   @@unique([organizationId, userId, academicYear])
   @@index([userId])
@@ -203,8 +222,13 @@ model AdviserAssignment {
   academicYear   String
   isCurrent      Boolean      @default(true)
   assignedAt     DateTime     @default(now())
+  // Succession: the outgoing adviser keeps their row; isCurrent flips false.
+  endedAt        DateTime?
+  endedById      String?
+  endedBy        User?        @relation("AdviserAssignmentEnder", fields: [endedById], references: [id])
+  endReason      String?
 
-  @@unique([organizationId, type, academicYear])
+  @@unique([organizationId, type, academicYear, adviserId])
   @@index([adviserId])
 }
 
@@ -215,6 +239,16 @@ model AdviserAssignment {
 enum RecognitionKind {
   INITIAL
   RENEWAL
+}
+
+// Interview workflow stage for recognition/renewal (§23).
+enum InterviewStatus {
+  NOT_SCHEDULED
+  SCHEDULED
+  COMPLETED
+  FOR_ADDITIONAL_REVIEW
+  PASSED
+  NEEDS_REVISION
 }
 
 enum RecognitionStatus {
@@ -230,20 +264,24 @@ enum RecognitionStatus {
 }
 
 model Recognition {
-  id             String            @id @default(cuid())
-  organizationId String
-  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  kind           RecognitionKind   @default(INITIAL)
-  academicYear   String
-  status         RecognitionStatus @default(DRAFT)
-  submittedAt    DateTime?
-  reviewedAt     DateTime?
-  decidedAt      DateTime?
-  decidedById    String?
-  decidedBy      User?             @relation("RecognitionDecidedBy", fields: [decidedById], references: [id])
-  remarks        String?
-  createdAt      DateTime          @default(now())
-  updatedAt      DateTime          @updatedAt
+  id              String            @id @default(cuid())
+  organizationId  String
+  organization    Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  kind            RecognitionKind   @default(INITIAL)
+  academicYear    String
+  status          RecognitionStatus @default(DRAFT)
+  // Interview is a first-class workflow stage, visible in the tracker.
+  interviewStatus InterviewStatus   @default(NOT_SCHEDULED)
+  interviewAt     DateTime?
+  interviewNotes  String?
+  submittedAt     DateTime?
+  reviewedAt      DateTime?
+  decidedAt       DateTime?
+  decidedById     String?
+  decidedBy       User?             @relation("RecognitionDecidedBy", fields: [decidedById], references: [id])
+  remarks         String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
 
   events RecognitionEvent[]
 
@@ -252,16 +290,16 @@ model Recognition {
 }
 
 model RecognitionEvent {
-  id            String            @id @default(cuid())
+  id            String             @id @default(cuid())
   recognitionId String
-  recognition   Recognition       @relation(fields: [recognitionId], references: [id], onDelete: Cascade)
+  recognition   Recognition        @relation(fields: [recognitionId], references: [id], onDelete: Cascade)
   actorId       String?
-  actor         User?             @relation("RecognitionEventActor", fields: [actorId], references: [id])
+  actor         User?              @relation("RecognitionEventActor", fields: [actorId], references: [id])
   action        String
   fromStatus    RecognitionStatus?
   toStatus      RecognitionStatus?
   note          String?
-  createdAt     DateTime          @default(now())
+  createdAt     DateTime           @default(now())
 
   @@index([recognitionId])
 }
@@ -289,29 +327,29 @@ enum ProposalStatus {
 }
 
 model ActivityProposal {
-  id             String        @id @default(cuid())
-  organizationId String
-  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  academicYear   String
-  title              String
-  description        String
-  objectives         String?
-  venue          String?
-  startAt        DateTime
-  endAt          DateTime
-  scope          ActivityScope @default(ORGANIZATION)
-  estimatedBudget Float?
+  id                   String         @id @default(cuid())
+  organizationId       String
+  organization         Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  academicYear         String
+  title                String
+  description          String
+  objectives           String?
+  venue                String?
+  startAt              DateTime
+  endAt                DateTime
+  scope                ActivityScope  @default(ORGANIZATION)
+  estimatedBudget      Float?
   expectedParticipants Int?
-  status         ProposalStatus @default(DRAFT)
-  submittedAt    DateTime?
-  decidedAt      DateTime?
-  decidedById    String?
-  decidedBy      User?         @relation("ProposalDecidedBy", fields: [decidedById], references: [id])
-  remarks        String?
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  status               ProposalStatus @default(DRAFT)
+  submittedAt          DateTime?
+  decidedAt            DateTime?
+  decidedById          String?
+  decidedBy            User?          @relation("ProposalDecidedBy", fields: [decidedById], references: [id])
+  remarks              String?
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
 
-  report AccomplishmentReport?
+  report            AccomplishmentReport?
   attendanceRecords ActivityAttendance[]
   checkIn           ActivityCheckIn?
 
@@ -376,12 +414,12 @@ enum ReportStatus {
 }
 
 model AccomplishmentReport {
-  id                 String         @id @default(cuid())
+  id                 String            @id @default(cuid())
   organizationId     String
-  organization       Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization       Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   // Optional link: reports may document an approved proposal or stand alone
   // for unplanned activities (configurable policy).
-  activityProposalId String?        @unique
+  activityProposalId String?           @unique
   activityProposal   ActivityProposal? @relation(fields: [activityProposalId], references: [id])
   academicYear       String
   title              String
@@ -389,18 +427,94 @@ model AccomplishmentReport {
   heldOn             DateTime
   actualParticipants Int?
   actualBudget       Float?
-  status             ReportStatus   @default(DRAFT)
+  status             ReportStatus      @default(DRAFT)
   submittedAt        DateTime?
   reviewedAt         DateTime?
   decidedById        String?
-  decidedBy          User?          @relation("ReportDecidedBy", fields: [decidedById], references: [id])
+  decidedBy          User?             @relation("ReportDecidedBy", fields: [decidedById], references: [id])
   remarks            String?
-  createdAt          DateTime       @default(now())
-  updatedAt          DateTime       @updatedAt
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
 
   @@index([organizationId])
   @@index([status])
   @@index([academicYear])
+}
+
+// ---------------------------------------------------------------------------
+// Document signature routing (§7-§11). Each routed document gets a Route with
+// an ordered list of Steps. The sequence is form-specific (FORM_ROUTES) and
+// strictly enforced: a step stays LOCKED until the previous one is SIGNED.
+// ---------------------------------------------------------------------------
+
+// Signatory slots. SENIOR_ADVISER maps to the org's current REGULAR adviser,
+// JUNIOR_ADVISER to its current PART_TIME adviser.
+enum SignatoryRole {
+  PRESIDENT
+  SECRETARY
+  SENIOR_ADVISER
+  JUNIOR_ADVISER
+  DEAN
+  SOA
+  OSAS
+}
+
+enum SignatureStepStatus {
+  LOCKED
+  CURRENT
+  SIGNED
+  RETURNED
+  REJECTED
+}
+
+enum RouteState {
+  IN_PROGRESS
+  COMPLETED
+  RETURNED_FOR_REVISION
+  REJECTED
+}
+
+model SignatureRoute {
+  id          String     @id @default(cuid())
+  // Parent document: "Recognition" | "ActivityProposal" | "AccomplishmentReport" | SF form key
+  entityType  String
+  entityId    String
+  formKey     String
+  title       String?
+  state       RouteState @default(IN_PROGRESS)
+  version     Int        @default(1)
+  createdById String
+  createdBy   User       @relation("SignatureRouteCreator", fields: [createdById], references: [id])
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  steps SignatureStep[]
+
+  @@unique([entityType, entityId])
+  @@index([formKey])
+}
+
+model SignatureStep {
+  id              String              @id @default(cuid())
+  routeId         String
+  route           SignatureRoute      @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  order           Int
+  role            SignatoryRole
+  // Resolved concrete signer once known (org officer / current adviser /
+  // college dean). Null for office slots (SOA/OSAS/DEAN until resolved).
+  signerId        String?
+  signer          User?               @relation("SignatureStepSigner", fields: [signerId], references: [id])
+  status          SignatureStepStatus @default(LOCKED)
+  signedAt        DateTime?
+  signatureImage  String?
+  signatureTyped  String?
+  signatureMethod String?
+  comment         String?
+  actedById       String?
+  actedBy         User?               @relation("SignatureStepActor", fields: [actedById], references: [id])
+
+  @@unique([routeId, order])
+  @@index([routeId, status])
 }
 
 // ---------------------------------------------------------------------------
@@ -423,21 +537,21 @@ enum DeadlineScope {
 }
 
 model Deadline {
-  id            String          @id @default(cuid())
-  name          String
-  process       DeadlineProcess
-  academicYear  String
-  startDate     DateTime
-  dueDate       DateTime
-  scopeType     DeadlineScope   @default(ALL)
+  id             String          @id @default(cuid())
+  name           String
+  process        DeadlineProcess
+  academicYear   String
+  startDate      DateTime
+  dueDate        DateTime
+  scopeType      DeadlineScope   @default(ALL)
   scopeCollegeId String?
-  scopeCollege  College?        @relation(fields: [scopeCollegeId], references: [id])
-  instructions  String?
-  isActive      Boolean         @default(true)
-  createdById   String
-  createdBy     User            @relation("DeadlineCreator", fields: [createdById], references: [id])
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
+  scopeCollege   College?        @relation(fields: [scopeCollegeId], references: [id])
+  instructions   String?
+  isActive       Boolean         @default(true)
+  createdById    String
+  createdBy      User            @relation("DeadlineCreator", fields: [createdById], references: [id])
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
 
   @@index([academicYear])
   @@index([process])
@@ -460,18 +574,18 @@ enum AttachmentKind {
 }
 
 model Attachment {
-  id           String   @id @default(cuid())
+  id           String          @id @default(cuid())
   // Parent record: "Recognition" | "ActivityProposal" | "AccomplishmentReport"
   entityType   String
   entityId     String
   fileName     String
-  storedName   String   @unique
+  storedName   String          @unique
   mimeType     String
   sizeBytes    Int
   kind         AttachmentKind?
   uploadedById String
-  uploadedBy   User     @relation("AttachmentUploader", fields: [uploadedById], references: [id])
-  createdAt    DateTime @default(now())
+  uploadedBy   User            @relation("AttachmentUploader", fields: [uploadedById], references: [id])
+  createdAt    DateTime        @default(now())
 
   @@index([entityType, entityId])
 }

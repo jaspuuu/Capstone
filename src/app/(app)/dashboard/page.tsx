@@ -13,7 +13,8 @@ import { requireUser } from "@/lib/auth/guards";
 import { isAdminRole } from "@/lib/auth/rbac";
 import type { Role } from "@/generated/prisma/client";
 import { db } from "@/lib/db";
-import { currentAcademicYear, formatDateTime, fullName, timeUntil } from "@/lib/utils";
+import { getSelectedAy } from "@/lib/ay-server";
+import { formatDateTime, fullName, timeUntil } from "@/lib/utils";
 import {
   AUDIT_ACTION_LABELS,
   DEADLINE_PROCESS_LABELS,
@@ -35,7 +36,7 @@ export const metadata: Metadata = { title: "Dashboard" };
 
 export default async function DashboardPage() {
   const user = await requireUser();
-  const ay = currentAcademicYear();
+  const ay = await getSelectedAy();
 
   if (isAdminRole(user.role)) return <AdminDashboard user={user} ay={ay} />;
   if (user.role === "DEAN") return <DeanDashboard user={user} ay={ay} />;

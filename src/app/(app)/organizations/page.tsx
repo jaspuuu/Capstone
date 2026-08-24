@@ -1,17 +1,20 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Download, Layers, Landmark, Plus } from "lucide-react";
+import { Compass, Download, Layers, Landmark, Plus } from "lucide-react";
 import { requireUser } from "@/lib/auth/guards";
 import { can, scopedOrgWhere } from "@/lib/auth/rbac";
 import { db } from "@/lib/db";
 import { ORG_STATE_META } from "@/lib/constants";
 import { deriveOrgState } from "@/lib/org-state";
+import { currentAcademicYear } from "@/lib/utils";
+import { applyForMembership } from "@/lib/actions/organizations";
 import { Badge, Chip } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/form";
 import { TableWrap, THead, TH, TR, TD } from "@/components/ui/table";
+import { ActionForm } from "@/components/action-form";
 
 export const metadata: Metadata = { title: "Organizations" };
 
@@ -106,6 +109,7 @@ export default async function OrganizationsPage({
         name: true,
         acronym: true,
         status: true,
+        type: true,
         collegeId: true,
         parentId: true,
         college: { select: { code: true, name: true } },
@@ -136,13 +140,12 @@ export default async function OrganizationsPage({
   }));
 
   // Classification:
-  //   mother       — has at least one linked sub-organization
+  //   mother       — flagged MOTHER, or has at least one linked sub-organization
   //   sub          — has a mother organization (parentId set)
-  //   independent  — no mother and no children of its own
-  const mothers = enriched.filter((o) => o.childrenCount > 0);
-  const subsAndIndependent = enriched.filter(
-    (o) => o.parentId !== null || o.childrenCount === 0
-  );
+  //   independent  — everything else
+  const isMother = (o: (typeof enriched)[number]) => o.type === "MOTHER" || o.childrenCount > 0;
+  const mothers = enriched.filter(isMother);
+  const subsAndIndependent = enriched.filter((o) => !isMother(o));
 
   // Shared filters applied to both panels.
   const q = (sp.q ?? "").trim().toLowerCase();
@@ -189,6 +192,33 @@ export default async function OrganizationsPage({
 
   const canManage = can(user, "org.manage");
   const canExport = can(user, "analytics.view");
+
+  // §14-§15: students hold one account across organizations. Beyond their own
+  // memberships they can browse every active organization and apply to join;
+  // the org's officers (or OSAS/SOA) review the application.
+  const isStudent = ["MEMBER", "PRESIDENT", "SECRETARY"].includes(user.role);
+  const ay = currentAcademicYear();
+  const scopedIds = scoped.map((o) => o.id);
+  const [directory, myMemberships] = isStudent
+    ? await Promise.all([
+        db.organization.findMany({
+          where: { status: "ACTIVE", archivedAt: null, id: { notIn: scopedIds } },
+          select: {
+            id: true,
+            name: true,
+            acronym: true,
+            college: { select: { code: true, name: true } },
+            parent: { select: { id: true, acronym: true, name: true } },
+          },
+          orderBy: { name: "asc" },
+        }),
+        db.organizationMember.findMany({
+          where: { userId: user.id, academicYear: ay },
+          select: { organizationId: true, status: true },
+        }),
+      ])
+    : [[], []];
+  const membershipByOrg = new Map(myMemberships.map((m) => [m.organizationId, m.status]));
 
   const motherPrev = motherView.page > 1 ? orgUrl({ mp: motherView.page - 1 }) : null;
   const motherNext = motherView.page < motherView.pages ? orgUrl({ mp: motherView.page + 1 }) : null;
@@ -507,6 +537,93 @@ export default async function OrganizationsPage({
           )}
         </Card>
       </div>
+
+      {/* Directory — students can apply to any active organization they are
+          not yet part of (§14-§15). Officers review applications on the
+          organization's profile page. */}
+      {isStudent && (
+        <Card className="mt-6 overflow-hidden">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-5 py-4">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <Compass className="size-4 shrink-0 text-primary" aria-hidden />
+                <h2 className="font-display text-base font-bold tracking-tight text-content">
+                  Directory · Join an organization
+                </h2>
+                <Chip>{directory.length}</Chip>
+              </div>
+              <p className="mt-0.5 text-xs text-content-muted">
+                All active organizations. Apply with your student account — officers review your request.
+              </p>
+            </div>
+          </div>
+
+          {directory.length === 0 ? (
+            <EmptyState
+              icon={Compass}
+              title="You already belong to every active organization."
+              description="Applications appear here once new organizations open their memberships."
+              className="border-0"
+            />
+          ) : (
+            <TableWrap>
+              <THead>
+                <TH>Organization</TH>
+                <TH>Mother Organization</TH>
+                <TH>College</TH>
+                <TH />
+              </THead>
+              <tbody>
+                {directory.map((o) => {
+                  const status = membershipByOrg.get(o.id);
+                  return (
+                    <TR key={o.id}>
+                      <TD>
+                        <span className="font-semibold text-content">{o.acronym ?? o.name}</span>
+                        {o.acronym && (
+                          <span className="block max-w-56 truncate text-xs text-content-secondary">{o.name}</span>
+                        )}
+                      </TD>
+                      <TD>
+                        {o.parent ? (
+                          <span className="max-w-40 truncate font-medium text-content" title={o.parent.name}>
+                            {o.parent.acronym ?? o.parent.name}
+                          </span>
+                        ) : (
+                          <Chip className="italic">Independent</Chip>
+                        )}
+                      </TD>
+                      <TD>
+                        <span className="whitespace-nowrap font-medium">{o.college.code}</span>
+                        <span className="block max-w-32 truncate text-xs text-content-muted">{o.college.name}</span>
+                      </TD>
+                      <TD>
+                        {status === "PENDING" ? (
+                          <Badge tone="warning">Application pending</Badge>
+                        ) : status === "APPROVED" ? (
+                          <Badge tone="success">Member</Badge>
+                        ) : status === "REJECTED" ? (
+                          <Badge tone="danger">Not approved</Badge>
+                        ) : (
+                          <ActionForm
+                            action={applyForMembership}
+                            submitLabel="Apply to join"
+                            variant="outline"
+                            footerClassName="mt-0"
+                          >
+                            <input type="hidden" name="organizationId" value={o.id} />
+                            <input type="hidden" name="academicYear" value={ay} />
+                          </ActionForm>
+                        )}
+                      </TD>
+                    </TR>
+                  );
+                })}
+              </tbody>
+            </TableWrap>
+          )}
+        </Card>
+      )}
     </>
   );
 }

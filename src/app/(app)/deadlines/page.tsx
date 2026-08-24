@@ -4,6 +4,7 @@ import { CalendarClock, Pencil, Plus } from "lucide-react";
 import { requireUser } from "@/lib/auth/guards";
 import { can } from "@/lib/auth/rbac";
 import { db } from "@/lib/db";
+import { getSelectedAy } from "@/lib/ay-server";
 import { DEADLINE_PROCESS_LABELS } from "@/lib/constants";
 import { deadlineStatus } from "@/lib/deadlines";
 import { formatDateTime } from "@/lib/utils";
@@ -20,11 +21,12 @@ export const metadata: Metadata = { title: "Deadlines" };
 export default async function DeadlinesPage() {
   const user = await requireUser();
   const canManage = can(user, "deadline.manage");
+  const ay = await getSelectedAy();
 
   const deadlines = await db.deadline.findMany({
-    where: canManage ? {} : { isActive: true },
+    where: { academicYear: ay, ...(canManage ? {} : { isActive: true }) },
     include: { scopeCollege: { select: { code: true, name: true } }, createdBy: { select: { firstName: true, lastName: true } } },
-    orderBy: [{ academicYear: "desc" }, { dueDate: "asc" }],
+    orderBy: [{ dueDate: "asc" }],
   });
 
   return (

@@ -5,6 +5,7 @@ import { requireUser } from "@/lib/auth/guards";
 import { currentAcademicYear } from "@/lib/utils";
 import { canUseOrgForm } from "@/lib/forms-access";
 import { Editable, PrintToolbar } from "@/components/forms/editable";
+import { PhotoBox } from "@/components/forms/photo-box";
 import {
   SfApprovers,
   SfFooter,
@@ -13,15 +14,69 @@ import {
   SignatureMark,
 } from "@/components/forms/sf-chrome";
 import { FormOrgPicker } from "@/components/forms/org-picker";
-import { getApproversSignatures, getSignaturesFor } from "@/lib/signatures";
+import { SignatureRouteSection } from "@/components/forms/signature-route-section";
+import { getApproversSignatures, getSignaturesFor, type SignatureInfo } from "@/lib/signatures";
 
 export const metadata: Metadata = { title: "SF-005 · List of Members of the Organization" };
 
+type SlotMember = {
+  user: {
+    id: string;
+    firstName: string;
+    middleName: string | null;
+    lastName: string;
+    studentNumber: string | null;
+    department: { name: string } | null;
+  };
+};
+
+/** One roster slot: picture box left, three ruled lines right with their
+ * field hints printed on the lines themselves (type over them). */
+function Slot({
+  member,
+  index = 0,
+  sigMap,
+}: {
+  member?: SlotMember;
+  index?: number;
+  sigMap: Map<string, SignatureInfo>;
+}) {
+  const n = index;
+  const hints = ["(Signature Over Printed Name)", "(Student Number)", "(Course / Year Section)"];
+  return (
+    <div className="flex w-fit items-center">
+      <PhotoBox label={`1×1 picture ${n}`} />
+      <div className="sf-slot-lines ml-[1.6mm] flex flex-col justify-center gap-0">
+        {[0, 1, 2].map((row) => {
+          const value = row === 0
+            ? member ? `${member.user.firstName}${member.user.middleName ? ` ${member.user.middleName}` : ""} ${member.user.lastName}` : hints[0]
+            : row === 1
+              ? member?.user.studentNumber || hints[1]
+              : member?.user.department?.name || hints[2];
+          return (
+            <div key={row}>
+              {row === 0 && member && sigMap.get(member.user.id) && <SignatureMark sig={sigMap.get(member.user.id)!} />}
+              <Editable
+                initial={value}
+                block
+                minWidth="56.4mm"
+                className={`w-[56.4mm] ${value.startsWith("(") ? "text-[9pt]" : ""}`}
+                ariaLabel={`${["Name line", "Student number", "Course/year/section"][row]} ${n}`}
+              />
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 /**
- * SF-005 — exact replica of the official member roster: empty 1×1 picture
- * boxes with signature-over-printed-name, student number and course/year/
- * section lines. Boxes are left blank on purpose, matching the paper form
- * that members paste their photos onto. Officers-only (contains personal data).
+ * SF-005 — pixel-faithful replica of the official DOCX (007-LIST-OF-MEMBERS):
+ * one example slot under "SAMPLE FORMAT:" with field captions above its ruled
+ * lines, then 4 rows × 2 columns of member slots — 1×1 picture box on the
+ * left, three 56.4mm ruled lines beside it (name / student no. / course-yr).
+ * The grid deliberately overflows the text margins like the original.
  */
 export default async function Sf005Page({
   searchParams,
@@ -79,12 +134,16 @@ export default async function Sf005Page({
     <>
       <PrintToolbar backHref={`/organizations/${org.id}`} title="SF-005 List of Members" />
 
-      <div className="sf-sheet-flow">
+      <div className="mx-auto mb-4 mt-2 max-w-[210mm] px-4 print:hidden">
+        <SignatureRouteSection formKey="SF005" orgId={org.id} ay={ay} />
+      </div>
+
+      <div className="sf-sheet-flow relative">
         <SfLetterhead />
 
-        <h1 className="mt-5 text-center font-bold">LIST OF MEMBERS OF THE ORGANIZATION</h1>
+        <h1 className="mt-4 text-center text-[12pt] font-bold">LIST OF MEMBERS OF THE ORGANIZATION</h1>
 
-        <p className="mt-3 text-center font-bold">
+        <p className="mt-2 text-center font-bold">
           <Editable initial="" minWidth="8mm" center ariaLabel="Semester number" /> Sem. / AY 20
           <Editable initial={ayStart.slice(2)} minWidth="7mm" center ariaLabel="AY start" /> - 20
           <Editable initial={ayEnd.slice(2)} minWidth="7mm" center ariaLabel="AY end" />
@@ -95,53 +154,19 @@ export default async function Sf005Page({
           <Editable initial={orgDisplay} minWidth="80mm" ariaLabel="Name of Organization" />
         </p>
 
-        {/* Sample-format block from the official form: one labeled example slot */}
-        <p className="mt-4 font-bold">SAMPLE FORMAT:</p>
-        <div className="mt-2 flex justify-center">
-          <div className="text-center">
-            <div className="mx-auto flex h-[24mm] w-[28mm] items-center justify-center border border-black text-center text-[9pt] leading-tight text-black">
-              1 x 1
-              <br />
-              PICTURE
-            </div>
-            <div className="mt-1 space-y-0.5">
-              <Editable initial="" block center minWidth="45mm" ariaLabel="Sample signature over printed name" />
-              <Editable initial="" block center minWidth="45mm" ariaLabel="Sample student number" />
-              <Editable initial="" block center minWidth="45mm" ariaLabel="Sample course/year/section" />
-            </div>
-          </div>
+        <p className="mt-3 text-center text-[11pt]">SAMPLE FORMAT:</p>
+
+        {/* Example slot: the field hints are printed on its ruled lines */}
+        <div className="mt-1 ml-[26mm]">
+          <Slot sigMap={sigMap} />
         </div>
 
-        {/* Member slots — 9 photo boxes per sheet, each with ruled lines like the official form */}
-        {Array.from({ length: Math.max(1, Math.ceil(org.members.length / 9)) }, (_, gi) => (
-          <div key={gi} className="mt-6 grid grid-cols-3 gap-x-6 gap-y-8">
-            {Array.from({ length: 9 }, (_, slot) => {
-              const m = org.members[gi * 9 + slot];
-              const n = gi * 9 + slot + 1;
-              return (
-                <div key={slot} className="text-center">
-                  <div className="mx-auto flex h-[24mm] w-[28mm] items-center justify-center border border-black text-center text-[9pt] leading-tight text-black">
-                    1 x 1
-                    <br />
-                    PICTURE
-                  </div>
-                  <div className="mt-1 space-y-0.5">
-                    {m && sigMap.get(m.user.id) && <SignatureMark sig={sigMap.get(m.user.id)!} />}
-                    <Editable
-                      initial={m ? `${m.user.firstName}${m.user.middleName ? ` ${m.user.middleName}` : ""} ${m.user.lastName}` : ""}
-                      block
-                      center
-                      minWidth="45mm"
-                      ariaLabel={`Signature over printed name ${n}`}
-                    />
-                    <Editable initial={m?.user.studentNumber ?? ""} block center minWidth="45mm" ariaLabel={`Student number ${n}`} />
-                    <Editable initial={m?.user.department?.name ?? ""} block center minWidth="45mm" ariaLabel={`Course/year/section ${n}`} />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        ))}
+        {/* Member roster — 4 rows × 2 columns; grid spans wider than the text margins */}
+        <div className="-ml-[13mm] mt-[2mm] grid w-[182mm] grid-cols-2 gap-x-[10mm] gap-y-[1.2mm]">
+          {Array.from({ length: Math.max(8, Math.ceil(org.members.length / 2) * 2) }, (_, i) => (
+            <Slot key={i} index={i + 1} member={org.members[i]} sigMap={sigMap} />
+          ))}
+        </div>
 
         {/* Adviser columns */}
         <div className="mt-10 flex justify-around gap-8">

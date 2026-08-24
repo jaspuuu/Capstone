@@ -2,7 +2,8 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   // Allow LAN devices (phone/tablet) to open the dev server by IP.
-  allowedDevOrigins: ["192.168.1.11"],
+  // DHCP reassigns addresses, so whitelist both known hosts of this network.
+  allowedDevOrigins: ["192.168.1.2", "192.168.1.11"],
   experimental: {
     // Attachment uploads are posted through server actions; leave room for
     // multipart overhead above the 10 MB file cap.

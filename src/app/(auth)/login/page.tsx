@@ -55,9 +55,16 @@ export default async function LoginPage({
   }
 
   return (
-    <div className="grid min-h-dvh lg:grid-cols-[1.1fr_1fr]">
+    <div
+      className="grid min-h-dvh lg:grid-cols-[1.1fr_1fr]"
+      style={{
+        backgroundImage: "url('/osas.jpg')",
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+      }}
+    >
       {/* Brand panel */}
-      <div className="relative hidden flex-col justify-between overflow-hidden bg-primary-dark p-10 text-white lg:flex">
+      <div className="relative hidden flex-col justify-between overflow-hidden bg-primary-dark/55 p-10 text-white lg:flex">
         <div
           aria-hidden
           className="absolute -top-32 -right-32 size-96 rounded-full bg-primary opacity-60 blur-3xl"
@@ -95,7 +102,7 @@ export default async function LoginPage({
       </div>
 
       {/* Form panel */}
-      <div className="flex items-center justify-center bg-surface px-4 py-12 sm:px-8">
+      <div className="flex items-center justify-center bg-surface/85 px-4 py-12 sm:px-8">
         <div className="w-full max-w-md">
           <div className="mb-8 flex items-center gap-3 lg:hidden">
             <span className="flex size-10 items-center justify-center rounded-xl bg-primary font-display text-sm font-extrabold text-white">

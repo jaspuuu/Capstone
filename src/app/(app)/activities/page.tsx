@@ -4,6 +4,7 @@ import { CalendarPlus, Plus } from "lucide-react";
 import { requireUser } from "@/lib/auth/guards";
 import { can, scopedOrgWhere } from "@/lib/auth/rbac";
 import { db } from "@/lib/db";
+import { getSelectedAy } from "@/lib/ay-server";
 import { ACTIVITY_SCOPE_LABELS, PROPOSAL_STATUS_META } from "@/lib/constants";
 import { formatDateTime } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -33,9 +34,11 @@ export default async function ActivitiesPage({
 }) {
   const user = await requireUser();
   const sp = await searchParams;
+  const ay = await getSelectedAy();
 
   const proposals = await db.activityProposal.findMany({
     where: {
+      academicYear: ay,
       organization: scopedOrgWhere(user),
       ...(sp.status ? { status: sp.status as never } : {}),
       ...(sp.q ? { title: { contains: sp.q, mode: "insensitive" as const } } : {}),

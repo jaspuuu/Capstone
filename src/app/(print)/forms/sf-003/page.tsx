@@ -14,6 +14,7 @@ import {
   SignatureMark,
 } from "@/components/forms/sf-chrome";
 import { FormOrgPicker } from "@/components/forms/org-picker";
+import { SignatureRouteSection } from "@/components/forms/signature-route-section";
 import { getApproversSignatures, getSignaturesFor, hasSignature } from "@/lib/signatures";
 
 export const metadata: Metadata = { title: "SF-003 · Organization Adviser Commitment Form" };
@@ -87,6 +88,10 @@ export default async function Sf003Page({
     <>
       <PrintToolbar backHref={`/organizations/${org.id}`} title="SF-003 Organization Adviser Commitment Form" />
 
+      <div className="mx-auto mb-4 mt-2 max-w-[210mm] px-4 print:hidden">
+        <SignatureRouteSection formKey="SF003" orgId={org.id} ay={ay} />
+      </div>
+
       <div className="sf-sheet">
         <SfLetterhead />
 
@@ -97,10 +102,10 @@ export default async function Sf003Page({
         <div className="mt-4">
           <p className="font-bold">THE DIRECTOR/CHAIRPERSON</p>
           <p className="font-bold">OFFICE OF STUDENT AFFAIRS AND SERVICES</p>
-          <p>LSPU</p>
+          <p className="font-bold">LSPU</p>
         </div>
 
-        <p className="mt-4 indent-10">Thru: The Coordinator, Student Organization Unit</p>
+        <p className="mt-4 indent-10 font-bold">Thru: The Coordinator, Student Organization Unit</p>
 
         <p className="mt-4">Sir/Madam:</p>
 
@@ -169,7 +174,7 @@ export default async function Sf003Page({
         </div>
 
         <p className="mt-8 font-bold">Noted:</p>
-        <div className="mt-6">
+        <div className="mt-6 font-bold">
           <SfSig
             name={dean ? `${dean.firstName} ${dean.lastName}` : ""}
             caption="Dean/Assoc. Dean of College"

@@ -24,19 +24,22 @@ import {
   RECOGNITION_STATUS_META,
 } from "@/lib/constants";
 import { deriveOrgState } from "@/lib/org-state";
-import { currentAcademicYear, formatDate, fullName } from "@/lib/utils";
-import { Badge, Chip } from "@/components/ui/badge";
+import { currentAcademicYear, formatDate, fullName } from "@/lib/utils";import { Badge, Chip } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Field, Select } from "@/components/ui/form";
 import { ActionForm, QuickActionForm } from "@/components/action-form";
 import {
   addMember,
+  applyForMembership,
   assignAdviser,
-  removeAdviserAssignment,
+  decideMembership,
+  endAdviserTerm,
   removeMember,
+  setMemberPosition,
   setOrganizationStatus,
 } from "@/lib/actions/organizations";
+import { MemberPicker } from "@/app/(app)/organizations/[id]/member-picker";
 
 export const metadata: Metadata = { title: "Organization profile" };
 
@@ -79,11 +82,27 @@ export default async function OrganizationDetailPage({
   const canManage = can(user, "org.manage");
   const isOfficer =
     user.role === "PRESIDENT" || user.role === "SECRETARY"
-      ? org.members.some((m) => m.userId === user.id)
+      ? org.members.some(
+          (m) =>
+            m.userId === user.id &&
+            m.academicYear === ay &&
+            (m.position === "PRESIDENT" || m.position === "SECRETARY")
+        )
       : false;
+  const canManageMembers = canManage || isOfficer;
 
   const currentAdvisers = org.advisers.filter((a) => a.academicYear === ay);
+  const pastAdvisers = org.advisers
+    .filter((a) => !a.isCurrent)
+    .sort((x, y) => (y.endedAt?.getTime() ?? 0) - (x.endedAt?.getTime() ?? 0));
   const currentMembers = org.members.filter((m) => m.academicYear === ay);
+  const pendingMembers = currentMembers.filter((m) => m.status === "PENDING");
+  const approvedMembers = currentMembers.filter((m) => m.status !== "PENDING");
+  const myMembership = currentMembers.find((m) => m.userId === user.id);
+  const canApply =
+    !myMembership &&
+    ["MEMBER", "PRESIDENT", "SECRETARY"].includes(user.role) &&
+    org.status === "ACTIVE";
   const currentRec = org.recognitions.find((r) => r.academicYear === ay);
   const hasPriorRecognition = org.recognitions.some((r) =>
     ["APPROVED", "RECOGNIZED"].includes(r.status)
@@ -118,6 +137,14 @@ export default async function OrganizationDetailPage({
             <span className="font-medium text-content-secondary">{org.acronym ?? org.name}</span>
           </nav>
           <div className="flex flex-wrap items-center gap-3">
+            {org.logoStoredName ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={`/logo/${org.id}`}
+                alt={`${org.name} logo`}
+                className="size-12 rounded-xl border border-line object-cover"
+              />
+            ) : null}
             <h1 className="font-display text-2xl font-bold tracking-tight text-content">
               {org.name}
             </h1>
@@ -225,7 +252,7 @@ export default async function OrganizationDetailPage({
             />
             <CardContent className="space-y-3">
               {(["REGULAR", "PART_TIME"] as const).map((t) => {
-                const a = currentAdvisers.find((x) => x.type === t);
+                const a = currentAdvisers.find((x) => x.type === t && x.isCurrent);
                 return (
                   <div
                     key={t}
@@ -248,23 +275,51 @@ export default async function OrganizationDetailPage({
                     </div>
                     {a && canManage && (
                       <QuickActionForm
-                        action={removeAdviserAssignment}
+                        action={endAdviserTerm}
                         hidden={{ assignmentId: a.id }}
-                        label="Remove"
+                        label="End term"
                         variant="ghost"
-                        confirmMessage={`Remove ${fullName(a.adviser)} as ${ADVISER_TYPE_LABELS[t]}?`}
+                        confirmMessage={`End ${fullName(a.adviser)}'s term as ${ADVISER_TYPE_LABELS[t]}? The record is kept in the adviser history.`}
                       />
                     )}
                   </div>
                 );
               })}
 
+              {/* §20: past terms are permanent history, never deleted. */}
+              {pastAdvisers.length > 0 && (
+                <details className="rounded-lg border border-line px-4 py-3">
+                  <summary className="cursor-pointer text-xs font-semibold text-content-secondary">
+                    Past adviser terms ({pastAdvisers.length})
+                  </summary>
+                  <ul className="mt-2 divide-y divide-line">
+                    {pastAdvisers.map((a) => (
+                      <li key={a.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium text-content">{fullName(a.adviser)}</p>
+                          <p className="text-xs text-content-secondary">
+                            {ADVISER_TYPE_LABELS[a.type]} · AY {a.academicYear}
+                            {a.endedAt ? ` · ended ${formatDate(a.endedAt)}` : ""}
+                          </p>
+                        </div>
+                        {a.endReason && (
+                          <Chip className="capitalize">{a.endReason.replaceAll("_", " ").toLowerCase()}</Chip>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+
               {canManage && (
                 <details className="rounded-lg border border-dashed border-line-strong px-4 py-3">
                   <summary className="cursor-pointer text-xs font-semibold text-primary">
                     <UserPlus className="mr-1 inline size-3.5" aria-hidden />
-                    Assign an adviser for AY {ay}
+                    Assign / succeed an adviser for AY {ay}
                   </summary>
+                  <p className="mt-2 text-xs text-content-secondary">
+                    Assigning into an occupied position ends the current adviser&rsquo;s term — the record stays in the history above.
+                  </p>
                   <ActionForm
                     action={assignAdviser}
                     submitLabel="Assign adviser"
@@ -289,7 +344,7 @@ export default async function OrganizationDetailPage({
                         </option>
                         {adviserPool.map((u) => (
                           <option key={u.id} value={u.id}>
-                            {fullName(u)} — {u.role === "ADVISER_REGULAR" ? "Regular" : "Part-Time"}
+                            {fullName(u)} — {u.role === "ADVISER_REGULAR" ? "Senior" : "Junior"}
                           </option>
                         ))}
                       </Select>
@@ -305,14 +360,48 @@ export default async function OrganizationDetailPage({
             <CardHeader
               icon={Users}
               title={`Officers & members · AY ${ay}`}
-              description={`${currentMembers.length} registered for the current academic year.`}
+              description={`${approvedMembers.length} registered for the current academic year.`}
             />
             <CardContent>
-              {currentMembers.length === 0 ? (
-                <p className="text-sm text-content-muted">No members registered yet.</p>
+              {/* Pending applications awaiting officer review (§15) */}
+              {canManageMembers && pendingMembers.length > 0 && (
+                <div className="mb-4 rounded-lg border border-warning/30 bg-warning-light/40 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-warning">
+                    Pending applications ({pendingMembers.length})
+                  </p>
+                  <ul className="mt-2 divide-y divide-warning/15">
+                    {pendingMembers.map((m) => (
+                      <li key={m.id} className="flex items-center justify-between gap-3 py-2 first:pt-0 last:pb-0">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-content">{fullName(m.user)}</p>
+                          <p className="truncate text-xs text-content-secondary">{m.user.email}</p>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-2">
+                          <QuickActionForm
+                            action={decideMembership}
+                            hidden={{ membershipId: m.id, decision: "APPROVED" }}
+                            label="Approve"
+                            variant="primary"
+                          />
+                          <QuickActionForm
+                            action={decideMembership}
+                            hidden={{ membershipId: m.id, decision: "REJECTED" }}
+                            label="Reject"
+                            variant="ghost"
+                            confirmMessage={`Reject ${fullName(m.user)}'s application?`}
+                          />
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {approvedMembers.length === 0 ? (
+                <p className="text-sm text-content-muted">No approved members yet.</p>
               ) : (
                 <ul className="divide-y divide-line">
-                  {currentMembers.map((m) => (
+                  {approvedMembers.map((m) => (
                     <li key={m.id} className="flex items-center justify-between gap-3 py-2.5 first:pt-0 last:pb-0">
                       <div className="flex min-w-0 items-center gap-3">
                         <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary-light font-display text-[11px] font-bold text-primary">
@@ -331,14 +420,40 @@ export default async function OrganizationDetailPage({
                       </div>
                       <div className="flex shrink-0 items-center gap-2">
                         <Chip>{MEMBER_POSITION_LABELS[m.position]}</Chip>
-                        {canManage && (
-                          <QuickActionForm
-                            action={removeMember}
-                            hidden={{ membershipId: m.id }}
-                            label="Remove"
-                            variant="ghost"
-                            confirmMessage={`Remove ${fullName(m.user)} from this organization?`}
-                          />
+                        {canManageMembers && (
+                          <>
+                            {/* §24: promote/demote inline — one President and
+                                one Secretary per year are enforced server-side. */}
+                            <form action={setMemberPosition} className="flex items-center gap-1">
+                              <input type="hidden" name="membershipId" value={m.id} />
+                              <label className="sr-only" htmlFor={`pos-${m.id}`}>
+                                Position for {fullName(m.user)}
+                              </label>
+                              <select
+                                id={`pos-${m.id}`}
+                                name="position"
+                                defaultValue={m.position}
+                                className="h-7 rounded-md border border-line-strong bg-surface px-1.5 text-xs"
+                              >
+                                <option value="MEMBER">Member</option>
+                                <option value="PRESIDENT">President</option>
+                                <option value="SECRETARY">Secretary</option>
+                              </select>
+                              <button
+                                type="submit"
+                                className="h-7 rounded-md border border-line-strong px-2 text-xs font-semibold text-content hover:border-primary hover:text-primary"
+                              >
+                                Set
+                              </button>
+                            </form>
+                            <QuickActionForm
+                              action={removeMember}
+                              hidden={{ membershipId: m.id }}
+                              label="Remove"
+                              variant="ghost"
+                              confirmMessage={`Remove ${fullName(m.user)} from this organization?`}
+                            />
+                          </>
                         )}
                       </div>
                     </li>
@@ -346,40 +461,77 @@ export default async function OrganizationDetailPage({
                 </ul>
               )}
 
-              {canManage && (
+              {/* Student self-service application (§14-§15): students keep one
+                  account across organizations; each membership is per org-year. */}
+              {myMembership?.status === "PENDING" && (
+                <p className="mt-4 rounded-lg bg-warning-light px-3 py-2 text-sm text-warning" role="status">
+                  Your membership application is awaiting officer review.
+                </p>
+              )}
+              {myMembership?.status === "REJECTED" && (
+                <p className="mt-4 rounded-lg bg-danger-light px-3 py-2 text-sm text-danger" role="status">
+                  Your previous application was not approved.
+                </p>
+              )}
+              {canApply && (
+                <details className="mt-4 rounded-lg border border-dashed border-line-strong px-4 py-3">
+                  <summary className="cursor-pointer text-xs font-semibold text-primary">Apply to join this organization</summary>
+                  <ActionForm action={applyForMembership} submitLabel="Submit application" footerClassName="mt-3" className="mt-3 space-y-3">
+                    <input type="hidden" name="organizationId" value={org.id} />
+                    <input type="hidden" name="academicYear" value={ay} />
+                    <p className="text-xs text-content-secondary">
+                      Your account details (name, student number, course) are pulled from your student profile — the officers will
+                      review and approve your membership.
+                    </p>
+                  </ActionForm>
+                </details>
+              )}
+
+              {canManageMembers && (
                 <details className="mt-4 rounded-lg border border-dashed border-line-strong px-4 py-3">
                   <summary className="cursor-pointer text-xs font-semibold text-primary">
                     <UserPlus className="mr-1 inline size-3.5" aria-hidden />
-                    Add a member for AY {ay}
+                    Add members for AY {ay}
                   </summary>
-                  <ActionForm
-                    action={addMember}
-                    submitLabel="Add member"
-                    footerClassName="mt-3"
-                    className="mt-3 space-y-3"
-                  >
-                    <input type="hidden" name="organizationId" value={org.id} />
-                    <input type="hidden" name="academicYear" value={ay} />
-                    <Field label="Student" htmlFor="mem-user">
-                      <Select id="mem-user" name="userId" required defaultValue="">
-                        <option value="" disabled>
-                          Select student account…
-                        </option>
-                        {studentPool.map((u) => (
-                          <option key={u.id} value={u.id}>
-                            {fullName(u)}
-                          </option>
-                        ))}
-                      </Select>
-                    </Field>
-                    <Field label="Position" htmlFor="mem-pos">
-                      <Select id="mem-pos" name="position" required defaultValue="MEMBER">
-                        <option value="MEMBER">Member</option>
-                        <option value="PRESIDENT">President</option>
-                        <option value="SECRETARY">Secretary</option>
-                      </Select>
-                    </Field>
-                  </ActionForm>
+
+                  {/* Bulk picker: search the student directory and register many at once (§13). */}
+                  <MemberPicker organizationId={org.id} academicYear={ay} />
+
+                  {canManage && (
+                    <>
+                      <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-content-muted">
+                        Single add with position
+                      </p>
+                      <ActionForm
+                        action={addMember}
+                        submitLabel="Add member"
+                        footerClassName="mt-3"
+                        className="mt-3 space-y-3"
+                      >
+                        <input type="hidden" name="organizationId" value={org.id} />
+                        <input type="hidden" name="academicYear" value={ay} />
+                        <Field label="Student" htmlFor="mem-user">
+                          <Select id="mem-user" name="userId" required defaultValue="">
+                            <option value="" disabled>
+                              Select student account…
+                            </option>
+                            {studentPool.map((u) => (
+                              <option key={u.id} value={u.id}>
+                                {fullName(u)}
+                              </option>
+                            ))}
+                          </Select>
+                        </Field>
+                        <Field label="Position" htmlFor="mem-pos">
+                          <Select id="mem-pos" name="position" required defaultValue="MEMBER">
+                            <option value="MEMBER">Member</option>
+                            <option value="PRESIDENT">President</option>
+                            <option value="SECRETARY">Secretary</option>
+                          </Select>
+                        </Field>
+                      </ActionForm>
+                    </>
+                  )}
                 </details>
               )}
             </CardContent>

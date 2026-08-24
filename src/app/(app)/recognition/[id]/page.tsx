@@ -1,11 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Award, CheckCircle2, FileText, Gavel, History, Undo2 } from "lucide-react";
+import { Award, CalendarClock, CheckCircle2, FileText, Gavel, History, Undo2 } from "lucide-react";
 import { requireUser } from "@/lib/auth/guards";
 import { can } from "@/lib/auth/rbac";
 import { db } from "@/lib/db";
-import { RECOGNITION_STATUS_META } from "@/lib/constants";
+import { RECOGNITION_STATUS_META, INTERVIEW_STATUS_META } from "@/lib/constants";
 import { RECOGNITION_STEPS, recognitionStepIndex } from "@/lib/org-state";
 import { formatDateTime, fullName } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -22,8 +22,10 @@ import {
   approveApplication,
   conferRecognition,
   endorseForApproval,
+  recordInterviewOutcome,
   rejectApplication,
   returnApplication,
+  scheduleInterview,
   startReview,
   submitRecognition,
 } from "@/lib/actions/recognition";
@@ -206,21 +208,32 @@ export default async function RecognitionDetailPage({
     title:
       e.toStatus
         ? `${e.fromStatus?.replaceAll("_", " ").toLowerCase() ?? "start"} → ${e.toStatus.replaceAll("_", " ").toLowerCase()}`
-        : e.action,
+        : e.action
+            .replaceAll("_", " ")
+            .toLowerCase()
+            .replace(/^interview /, "Interview: "),
     meta: formatDateTime(e.createdAt),
     actor: e.actor ? fullName(e.actor) : null,
     body: e.note,
     tone:
-      e.toStatus === "RECOGNIZED" || e.toStatus === "APPROVED"
+      e.action?.startsWith("INTERVIEW_PASSED") || e.toStatus === "RECOGNIZED" || e.toStatus === "APPROVED"
         ? ("success" as const)
         : e.toStatus === "REJECTED"
           ? ("danger" as const)
-          : e.toStatus === "RETURNED"
+          : e.toStatus === "RETURNED" || e.action === "INTERVIEW_NEEDS_REVISION"
             ? ("warning" as const)
-            : e.toStatus
+            : e.toStatus || e.action?.startsWith("INTERVIEW_")
               ? ("info" as const)
               : ("neutral" as const),
   }));
+
+  // §16-§18: the distinct interview stage lives inside pending/under review.
+  const interviewRelevant = ["SUBMITTED", "UNDER_REVIEW"].includes(rec.status);
+  const canReviewHere =
+    active &&
+    can(user, "recognition.review") &&
+    !(user.role === "DEAN" && rec.organization.collegeId !== user.collegeId);
+  const showInterviewControls = interviewRelevant && canReviewHere;
 
   return (
     <>
@@ -293,6 +306,90 @@ export default async function RecognitionDetailPage({
                     </ActionForm>
                   </div>
                 ))}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* §16-§18: Interview stage */}
+          {(showInterviewControls || rec.interviewStatus !== "NOT_SCHEDULED") && (
+            <Card>
+              <CardHeader
+                icon={CalendarClock}
+                title="Interview"
+                description="A distinct stage of the review — scheduling and outcome are tracked here."
+              />
+              <CardContent className="space-y-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge tone={INTERVIEW_STATUS_META[rec.interviewStatus].tone}>
+                    {INTERVIEW_STATUS_META[rec.interviewStatus].label}
+                  </Badge>
+                  {rec.interviewAt && (
+                    <span className="text-sm font-medium text-content">
+                      {formatDateTime(rec.interviewAt)}
+                    </span>
+                  )}
+                </div>
+                {rec.interviewNotes && (
+                  <p className="rounded-lg bg-surface-secondary px-3 py-2 text-sm whitespace-pre-wrap text-content-secondary">
+                    {rec.interviewNotes}
+                  </p>
+                )}
+
+                {showInterviewControls && rec.interviewStatus === "NOT_SCHEDULED" && (
+                  <ActionForm
+                    action={scheduleInterview}
+                    submitLabel="Schedule interview"
+                    variant="primary"
+                    footerClassName="mt-3"
+                    className="space-y-3"
+                  >
+                    <input type="hidden" name="id" value={rec.id} />
+                    <Field label="Date & time" htmlFor="interview-at" required>
+                      <input
+                        id="interview-at"
+                        name="interviewAt"
+                        type="datetime-local"
+                        required
+                        className="h-10 rounded-lg border border-line-strong bg-surface px-3 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/15"
+                      />
+                    </Field>
+                    <Field label="Instructions / venue (optional)" htmlFor="interview-note">
+                      <Textarea id="interview-note" name="note" rows={2} maxLength={500} placeholder="e.g. OSAS conference room, bring the SF-005 roster…" />
+                    </Field>
+                  </ActionForm>
+                )}
+
+                {showInterviewControls && rec.interviewStatus !== "NOT_SCHEDULED" && (
+                  <ActionForm
+                    action={recordInterviewOutcome}
+                    submitLabel="Record outcome"
+                    variant="outline"
+                    footerClassName="mt-3"
+                    className="space-y-3"
+                  >
+                    <input type="hidden" name="id" value={rec.id} />
+                    <Field label="Outcome" htmlFor="interview-outcome" required>
+                      <select
+                        id="interview-outcome"
+                        name="outcome"
+                        required
+                        defaultValue=""
+                        className="h-10 rounded-lg border border-line-strong bg-surface px-3 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/15"
+                      >
+                        <option value="" disabled>
+                          Select the result of the interview…
+                        </option>
+                        <option value="COMPLETED">Completed — proceed with review</option>
+                        <option value="PASSED">Passed</option>
+                        <option value="FOR_ADDITIONAL_REVIEW">For additional review</option>
+                        <option value="NEEDS_REVISION">Needs revision</option>
+                      </select>
+                    </Field>
+                    <Field label="Findings (required when needs revision)" htmlFor="interview-findings">
+                      <Textarea id="interview-findings" name="note" rows={2} maxLength={1000} placeholder="What was discussed or must be corrected…" />
+                    </Field>
+                  </ActionForm>
+                )}
               </CardContent>
             </Card>
           )}

@@ -4,6 +4,7 @@ import { ArrowLeft } from "lucide-react";
 import { requirePermission } from "@/lib/auth/guards";
 import { db } from "@/lib/db";
 import { createOrganization } from "@/lib/actions/organizations";
+import { currentAcademicYear } from "@/lib/utils";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import { OrganizationForm } from "../organization-form";
@@ -13,7 +14,7 @@ export const metadata: Metadata = { title: "New organization" };
 export default async function NewOrganizationPage() {
   await requirePermission("org.manage");
 
-  const [colleges, departments, orgs] = await Promise.all([
+  const [colleges, departments, orgs, students, advisers] = await Promise.all([
     db.college.findMany({ orderBy: { name: "asc" } }),
     db.department.findMany({ orderBy: { name: "asc" } }),
     db.organization.findMany({
@@ -21,7 +22,18 @@ export default async function NewOrganizationPage() {
       select: { id: true, name: true, acronym: true },
       orderBy: { name: "asc" },
     }),
+    db.user.findMany({
+      where: { isActive: true, role: { in: ["MEMBER", "PRESIDENT", "SECRETARY"] } },
+      select: { id: true, firstName: true, lastName: true },
+      orderBy: { lastName: "asc" },
+    }),
+    db.user.findMany({
+      where: { isActive: true, role: "ADVISER_REGULAR" },
+      select: { id: true, firstName: true, lastName: true },
+      orderBy: { lastName: "asc" },
+    }),
   ]);
+  const ay = currentAcademicYear();
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -48,9 +60,13 @@ export default async function NewOrganizationPage() {
         <CardContent>
           <OrganizationForm
             action={createOrganization}
+            mode="create"
+            academicYear={ay}
             colleges={colleges.map((c) => ({ id: c.id, label: `${c.name} (${c.code})` }))}
             departments={departments.map((d) => ({ id: d.id, name: d.name, collegeId: d.collegeId }))}
             organizations={orgs.map((o) => ({ id: o.id, label: o.acronym ?? o.name }))}
+            students={students.map((s) => ({ id: s.id, label: `${s.firstName} ${s.lastName}` }))}
+            advisers={advisers.map((a) => ({ id: a.id, label: `${a.firstName} ${a.lastName}` }))}
             submitLabel="Create organization"
           />
         </CardContent>

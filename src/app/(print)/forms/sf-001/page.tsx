@@ -14,6 +14,7 @@ import {
   SignatureMark,
 } from "@/components/forms/sf-chrome";
 import { FormOrgPicker } from "@/components/forms/org-picker";
+import { SignatureRouteSection } from "@/components/forms/signature-route-section";
 import { getApproversSignatures, getSignaturesFor } from "@/lib/signatures";
 
 export const metadata: Metadata = { title: "SF-001 · Application for Recognition/Renewal" };
@@ -85,6 +86,10 @@ export default async function Sf001Page({
   return (
     <>
       <PrintToolbar backHref={`/organizations/${org.id}`} title="SF-001 Application for Recognition/Renewal" />
+
+      <div className="mx-auto mb-4 mt-2 max-w-[210mm] px-4 print:hidden">
+        <SignatureRouteSection formKey="SF001" orgId={org.id} ay={ay} />
+      </div>
 
       <div className="sf-sheet">
         <SfLetterhead />

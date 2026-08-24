@@ -4,7 +4,8 @@ import { AlertTriangle, CalendarCheck, ClipboardList, Flag, Wallet } from "lucid
 import { requirePermission } from "@/lib/auth/guards";
 import { scopedOrgWhere } from "@/lib/auth/rbac";
 import { db } from "@/lib/db";
-import { currentAcademicYear, formatMoney, formatDateTime } from "@/lib/utils";
+import { getSelectedAy } from "@/lib/ay-server";
+import { formatMoney, formatDateTime } from "@/lib/utils";
 import {
   attendanceRate,
   monitorOrg,
@@ -29,7 +30,7 @@ export const metadata: Metadata = { title: "Activity Monitoring" };
  */
 export default async function MonitoringPage() {
   const user = await requirePermission("org.view");
-  const ay = currentAcademicYear();
+  const ay = await getSelectedAy();
   const now = new Date();
 
   const orgsRaw = await db.organization.findMany({

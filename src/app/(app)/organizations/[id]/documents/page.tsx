@@ -17,7 +17,9 @@ import {
   type ParentRef,
 } from "@/lib/attachment-access";
 import { ATTACHMENT_KIND_LABELS, type AttachmentKind } from "@/lib/attachments";
-import { currentAcademicYear, formatDate } from "@/lib/utils";
+import { REQUIREMENT_STATUS_META } from "@/lib/constants";
+import { formatDate } from "@/lib/utils";
+import { getSelectedAy } from "@/lib/ay-server";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -69,9 +71,10 @@ export default async function OrganizationDocumentsPage({
     }),
   ]);
 
-  // Which academic year are we looking at? Defaults to the current one.
-  const years = [...new Set([currentAcademicYear(), ...recognitions.map((r) => r.academicYear)])];
-  const ay = sp.ay && years.includes(sp.ay) ? sp.ay : currentAcademicYear();
+  // Which academic year are we looking at? Defaults to the topbar-selected one.
+  const selected = await getSelectedAy();
+  const years = [...new Set([selected, ...recognitions.map((r) => r.academicYear)])];
+  const ay = sp.ay && years.includes(sp.ay) ? sp.ay : selected;
   const yearRecs = recognitions.filter((r) => r.academicYear === ay);
 
   const attachments = yearRecs.length
@@ -194,8 +197,15 @@ export default async function OrganizationDocumentsPage({
           <CardHeader
             icon={CheckCircle2}
             title={`SF-001 requirements · AY ${ay}`}
-            description="A requirement is satisfied once a matching document is uploaded to the application."
+            description="Each document follows its application: Required → Submitted → Under Review → Approved (or Returned)."
           />
+          <div className="flex flex-wrap items-center gap-2 border-b border-line px-5 py-2.5">
+            {Object.entries(REQUIREMENT_STATUS_META).map(([k, m]) => (
+              <Badge key={k} tone={m.tone}>
+                {m.label}
+              </Badge>
+            ))}
+          </div>
           <ul className="divide-y divide-line">
             {items.map((item) => {
               const files =
@@ -213,7 +223,9 @@ export default async function OrganizationDocumentsPage({
                       )}
                       <span className="text-sm font-semibold text-content">{item.label}</span>
                     </div>
-                    <Badge tone={item.met ? "success" : "danger"}>{item.met ? "Submitted" : "Missing"}</Badge>
+                    <Badge tone={REQUIREMENT_STATUS_META[item.status].tone}>
+                      {REQUIREMENT_STATUS_META[item.status].label}
+                    </Badge>
                   </div>
 
                   {(files.length > 0 || (item.key === "ACCOMPLISHMENT_REPORTS" && reportEvidence.length > 0)) && (

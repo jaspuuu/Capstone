@@ -14,6 +14,10 @@ export function OrganizationForm({
   departments,
   organizations,
   initial,
+  students,
+  advisers,
+  academicYear,
+  mode = "edit",
   submitLabel,
 }: {
   action: (prev: ActionState, formData: FormData) => Promise<ActionState>;
@@ -31,6 +35,11 @@ export function OrganizationForm({
     departmentId?: string | null;
     foundedYear?: number | null;
   };
+  /** §28: optional validated founding officers/adviser (create mode only). */
+  students?: Option[];
+  advisers?: Option[];
+  academicYear?: string;
+  mode?: "create" | "edit";
   submitLabel: string;
 }) {
   const [state, formAction] = useActionState<ActionState, FormData>(action, {});
@@ -135,7 +144,21 @@ export function OrganizationForm({
           />
         </Field>
 
-        <Field label="Description" htmlFor="description" className="md:col-span-2">
+        <Field
+          label="Logo"
+          htmlFor="logo"
+          hint="PNG, JPEG, or WebP · up to 2 MB · optional"
+        >
+          <input
+            id="logo"
+            name="logo"
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            className="h-10 w-full rounded-lg border border-line-strong bg-surface px-3 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-primary-light file:px-2.5 file:py-1 file:text-xs file:font-semibold file:text-primary"
+          />
+        </Field>
+
+        <Field label="Description" htmlFor="description" className="md:col-span-1">
           <Textarea
             id="description"
             name="description"
@@ -145,6 +168,50 @@ export function OrganizationForm({
           />
         </Field>
       </div>
+
+      {mode === "create" && (
+        <div className="space-y-4 rounded-xl border border-line p-4">
+          <div>
+            <p className="text-sm font-bold text-content">Founding officers & adviser</p>
+            <p className="mt-0.5 text-xs text-content-secondary">
+              Optional — pick from validated accounts. The President and Secretary are registered as the first
+              officers for AY {academicYear ?? "the current academic year"}; the adviser must be a Senior Adviser (Regular Faculty).
+            </p>
+          </div>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+            <Field label="President" htmlFor="presidentId">
+              <Select id="presidentId" name="presidentId" defaultValue="">
+                <option value="">None yet</option>
+                {(students ?? []).map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.label}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Secretary" htmlFor="secretaryId">
+              <Select id="secretaryId" name="secretaryId" defaultValue="">
+                <option value="">None yet</option>
+                {(students ?? []).map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.label}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Senior Adviser (Regular)" htmlFor="adviserId">
+              <Select id="adviserId" name="adviserId" defaultValue="">
+                <option value="">None yet</option>
+                {(advisers ?? []).map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.label}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          </div>
+        </div>
+      )}
 
       <div className="flex items-center gap-3 border-t border-line pt-4">
         <SubmitButton pendingLabel="Saving…">{submitLabel}</SubmitButton>

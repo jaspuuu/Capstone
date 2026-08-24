@@ -9,7 +9,7 @@ import { requirePermissionOrThrow, requireUser } from "@/lib/auth/guards";
 import { can } from "@/lib/auth/rbac";
 import { writeAudit } from "@/lib/audit";
 import { notifyOrgOfficers } from "@/lib/notifications";
-import { currentAcademicYear, nextAcademicYear } from "@/lib/utils";
+import { currentAcademicYear, formatDateTime, nextAcademicYear } from "@/lib/utils";
 
 export type ActionState = { error?: string; success?: string };
 
@@ -53,8 +53,8 @@ async function recordEvent(
   recognitionId: string,
   actorId: string,
   action: string,
-  from: RecognitionStatus,
-  to: RecognitionStatus,
+  from: RecognitionStatus | null,
+  to: RecognitionStatus | null,
   note?: string | null
 ) {
   await db.recognitionEvent.create({
@@ -304,6 +304,142 @@ export const returnApplication = transitionAction("RETURN");
 export const approveApplication = transitionAction("APPROVE");
 export const rejectApplication = transitionAction("REJECT");
 export const conferRecognition = transitionAction("CONFER");
+
+// ---------------------------------------------------------------------------
+// §16-§18: interview stage. Reviewers schedule an interview and record its
+// outcome without moving the application out of its current workflow status.
+// ---------------------------------------------------------------------------
+
+const INTERVIEW_OUTCOMES = [
+  "COMPLETED",
+  "FOR_ADDITIONAL_REVIEW",
+  "PASSED",
+  "NEEDS_REVISION",
+] as const;
+
+type InterviewOutcome = (typeof INTERVIEW_OUTCOMES)[number];
+
+async function assertInterviewScope(id: string) {
+  const user = await requireUser();
+  if (!can(user, "recognition.review")) {
+    throw new Error("Only reviewers can manage the interview stage.");
+  }
+  const rec = await loadRecognition(id);
+  if (!rec) throw new Error("Application not found.");
+  try {
+    await assertReviewerScope(user, rec.organization.collegeId);
+  } catch (e) {
+    throw new Error(e instanceof Error ? e.message : "Out of scope.");
+  }
+  if (!["SUBMITTED", "UNDER_REVIEW"].includes(rec.status)) {
+    throw new Error(
+      `Interviews apply only while an application is pending or under review (currently "${rec.status.replaceAll("_", " ").toLowerCase()}").`
+    );
+  }
+  return { user, rec };
+}
+
+export async function scheduleInterview(
+  _prev: ActionState,
+  formData: FormData
+): Promise<ActionState> {
+  try {
+    const id = String(formData.get("id") ?? "");
+    const when = String(formData.get("interviewAt") ?? "");
+    const note = String(formData.get("note") ?? "").trim();
+    const { user, rec } = await assertInterviewScope(id);
+
+    if (!when) return { error: "Pick a date and time for the interview." };
+    const interviewAt = new Date(when);
+    if (Number.isNaN(interviewAt.getTime())) return { error: "Invalid date/time." };
+
+    await db.recognition.update({
+      where: { id },
+      data: { interviewStatus: "SCHEDULED", interviewAt, interviewNotes: note || null },
+    });
+    await recordEvent(
+      id,
+      user.id,
+      "INTERVIEW_SCHEDULED",
+      rec.status,
+      null,
+      `Interview scheduled for ${formatDateTime(interviewAt)}${note ? ` — ${note}` : ""}`
+    );
+    await writeAudit({
+      userId: user.id,
+      action: "INTERVIEW_SCHEDULED",
+      entityType: "Recognition",
+      entityId: id,
+      entityLabel: `${rec.organization.name} · AY ${rec.academicYear}`,
+      newState: { interviewAt: interviewAt.toISOString(), note: note || undefined },
+    });
+    try {
+      await notifyOrgOfficers(rec.organizationId, {
+        type: "INTERVIEW_SCHEDULED",
+        title: `Interview scheduled: ${rec.organization.name}`,
+        body: `AY ${rec.academicYear} · ${formatDateTime(interviewAt)}${note ? ` · ${note.slice(0, 140)}` : ""}`,
+        link: `/recognition/${id}`,
+      });
+    } catch {
+      // Best-effort.
+    }
+    revalidatePath(`/recognition/${id}`);
+    revalidatePath("/recognition");
+    return { success: "Interview scheduled." };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Failed to schedule interview." };
+  }
+}
+
+export async function recordInterviewOutcome(
+  _prev: ActionState,
+  formData: FormData
+): Promise<ActionState> {
+  try {
+    const id = String(formData.get("id") ?? "");
+    const outcome = String(formData.get("outcome") ?? "");
+    const note = String(formData.get("note") ?? "").trim();
+
+    if (!INTERVIEW_OUTCOMES.includes(outcome as InterviewOutcome)) {
+      return { error: "Invalid interview outcome." };
+    }
+    const outcomeKey = outcome as InterviewOutcome;
+    if (outcomeKey === "NEEDS_REVISION" && !note) {
+      return { error: "Explain what needs to be revised." };
+    }
+
+    const { user, rec } = await assertInterviewScope(id);
+    if (rec.interviewStatus === "NOT_SCHEDULED") {
+      return { error: "Schedule the interview first." };
+    }
+
+    await db.recognition.update({
+      where: { id },
+      data: { interviewStatus: outcomeKey, interviewNotes: note || rec.interviewNotes },
+    });
+    const labels: Record<InterviewOutcome, string> = {
+      COMPLETED: "Interview completed",
+      FOR_ADDITIONAL_REVIEW: "Interview held — for additional review",
+      PASSED: "Interview passed",
+      NEEDS_REVISION: "Interview held — needs revision",
+    };
+    await recordEvent(id, user.id, `INTERVIEW_${outcomeKey}`, rec.status, null, `${labels[outcomeKey]}${note ? ` — ${note}` : ""}`);
+    await writeAudit({
+      userId: user.id,
+      action: `INTERVIEW_${outcomeKey}`,
+      entityType: "Recognition",
+      entityId: id,
+      entityLabel: `${rec.organization.name} · AY ${rec.academicYear}`,
+      previousState: { interviewStatus: rec.interviewStatus },
+      newState: { interviewStatus: outcomeKey, note: note || undefined },
+    });
+    revalidatePath(`/recognition/${id}`);
+    revalidatePath("/recognition");
+    return { success: labels[outcomeKey] + "." };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Failed to record outcome." };
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Quick-start renewal for the next academic year (officers/admins)
