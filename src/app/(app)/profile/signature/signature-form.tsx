@@ -268,7 +268,7 @@ export function SignatureForm({
                 Preview
               </p>
               <p
-                className="rounded-lg border border-line bg-white px-4 py-3 text-[28px] leading-snug text-gray-900"
+                className="rounded-lg border border-line bg-white px-4 py-3 text-[28px] leading-snug text-content"
                 style={{ fontFamily: '"Great Vibes", cursive' }}
               >
                 {typed.trim() || "Your name here"}

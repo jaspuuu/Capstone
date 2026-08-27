@@ -139,9 +139,13 @@ export default async function DeadlinesPage() {
                   <Card className="p-4">
                     <div className="flex items-start justify-between gap-2">
                       <p className="font-display text-sm font-bold text-content">{d.name}</p>
-                      <Badge tone={st === "OPEN" ? "success" : st === "UPCOMING" ? "info" : "neutral"}>
-                        {st === "OPEN" ? "Open" : st === "UPCOMING" ? "Upcoming" : "Closed"}
-                      </Badge>
+                      {!d.isActive ? (
+                        <Badge tone="neutral">Inactive</Badge>
+                      ) : (
+                        <Badge tone={st === "OPEN" ? "success" : st === "UPCOMING" ? "info" : "neutral"}>
+                          {st === "OPEN" ? "Open" : st === "UPCOMING" ? "Upcoming" : "Closed"}
+                        </Badge>
+                      )}
                     </div>
                     <p className="mt-1.5 text-xs text-content-secondary">
                       {DEADLINE_PROCESS_LABELS[d.process]} · AY {d.academicYear}

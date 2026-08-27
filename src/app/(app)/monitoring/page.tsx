@@ -13,7 +13,7 @@ import {
   type MonitoredActivity,
   type OrgMonitoring,
 } from "@/lib/monitoring";
-import { PROPOSAL_STATUS_META } from "@/lib/constants";
+import { ACTIVITY_PHASE_META } from "@/lib/constants";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatCard } from "@/components/ui/stat-card";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -23,11 +23,7 @@ import { TableWrap, THead, TH, TR, TD } from "@/components/ui/table";
 
 export const metadata: Metadata = { title: "Activity Monitoring" };
 
-/**
- * Part 8 - Plan of activities monitoring & evaluation. Live pipeline view
- * per organization plus fixed evaluation rules: activities that ended
- * without an accomplishment report, budget variance, attendance capture.
- */
+
 export default async function MonitoringPage() {
   const user = await requirePermission("org.view");
   const ay = await getSelectedAy();
@@ -47,6 +43,7 @@ export default async function MonitoringPage() {
           id: true,
           title: true,
           status: true,
+          phase: true,
           scope: true,
           venue: true,
           startAt: true,
@@ -69,6 +66,7 @@ export default async function MonitoringPage() {
         id: a.id,
         title: a.title,
         status: a.status,
+        phase: a.phase,
         scope: a.scope,
         venue: a.venue,
         startAt: a.startAt,
@@ -98,7 +96,10 @@ export default async function MonitoringPage() {
         description={`Plan of activities monitoring & evaluation · AY ${ay}`}
         breadcrumb={[{ label: "Activity Monitoring" }]}
         actions={
-          <Link href="/monitoring/report" className="btn-outline">
+          <Link
+            href="/monitoring/report"
+            className="inline-flex h-10 items-center gap-2 rounded-lg border border-line-strong bg-surface px-4 text-sm font-semibold text-content hover:border-primary"
+          >
             <ClipboardList className="size-4" aria-hidden /> Monitoring report
           </Link>
         }
@@ -149,18 +150,15 @@ export default async function MonitoringPage() {
         <CardHeader title="Per-organization pipeline" description={`Activity proposal outcomes for AY ${ay}.`} />
         <CardContent>
           <TableWrap>
-            <table>
-              <THead>
-                <TR>
-                  <TH>Organization</TH>
-                  <TH>Pipeline</TH>
-                  <TH>Planned</TH>
-                  <TH>Completed</TH>
-                  <TH>Unreported</TH>
-                  <TH>Budget (actual / planned)</TH>
-                  <TH>Next up</TH>
-                </TR>
-              </THead>
+            <THead>
+              <TH>Organization</TH>
+              <TH>Pipeline</TH>
+              <TH>Planned</TH>
+              <TH>Completed</TH>
+              <TH>Unreported</TH>
+              <TH>Budget (actual / planned)</TH>
+              <TH>Next up</TH>
+            </THead>
               <tbody>
                 {monitored.map((o) => (
                   <TR key={o.id}>
@@ -213,7 +211,6 @@ export default async function MonitoringPage() {
                   </TR>
                 )}
               </tbody>
-            </table>
           </TableWrap>
         </CardContent>
       </Card>
@@ -232,7 +229,7 @@ export default async function MonitoringPage() {
                   <ul className="divide-y divide-line rounded-xl border border-line">
                     {o.activities.map((a) => {
                       const rate = attendanceRate(a);
-                      const meta = PROPOSAL_STATUS_META[a.status];
+                      const phaseMeta = ACTIVITY_PHASE_META[a.phase ?? "PLAN"];
                       return (
                         <li key={a.id} className="flex items-center gap-3 px-4 py-3">
                           <div className="min-w-0 flex-1">
@@ -248,7 +245,7 @@ export default async function MonitoringPage() {
                                 : ""}
                             </p>
                           </div>
-                          <Badge tone={meta?.tone ?? "neutral"}>{meta?.label ?? a.status}</Badge>
+                          <Badge tone={phaseMeta?.tone ?? "neutral"}>{phaseMeta?.label ?? a.phase ?? a.status}</Badge>
                         </li>
                       );
                     })}

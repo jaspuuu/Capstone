@@ -3,7 +3,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
   Award,
+  ArrowRight,
   CalendarDays,
+  ClipboardList,
   FileStack,
   GraduationCap,
   Landmark,
@@ -19,25 +21,39 @@ import { db } from "@/lib/db";
 import {
   ADVISER_TYPE_LABELS,
   MEMBER_POSITION_LABELS,
+  MEMBERSHIP_STATUS_META,
+  ORG_APPLICATION_STATUS_META,
   ORG_STATE_META,
   ORG_TYPE_LABELS,
   RECOGNITION_STATUS_META,
 } from "@/lib/constants";
-import { deriveOrgState } from "@/lib/org-state";
+import { deriveOrgState, ORG_APPLICATION_STEPS, orgApplicationStepIndex } from "@/lib/org-state";
 import { currentAcademicYear, formatDate, fullName } from "@/lib/utils";import { Badge, Chip } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Field, Select } from "@/components/ui/form";
+import { Alert } from "@/components/ui/alert";
+import { Field, Select, Textarea } from "@/components/ui/form";
+import { WorkflowSteps } from "@/components/ui/progress";
 import { ActionForm, QuickActionForm } from "@/components/action-form";
 import {
   addMember,
   applyForMembership,
   assignAdviser,
   decideMembership,
+  deactivateMembership,
   endAdviserTerm,
   removeMember,
+  reviewMembership,
   setMemberPosition,
   setOrganizationStatus,
+  submitOrgApplication,
+  startOrgReview,
+  adviserApproveApplication,
+  deanApproveApplication,
+  soaApproveApplication,
+  conferOrgApplication,
+  returnOrgApplication,
+  rejectOrgApplication,
 } from "@/lib/actions/organizations";
 import { MemberPicker } from "@/app/(app)/organizations/[id]/member-picker";
 
@@ -80,6 +96,7 @@ export default async function OrganizationDetailPage({
   const ay = currentAcademicYear();
   const state = deriveOrgState(org, org.recognitions);
   const canManage = can(user, "org.manage");
+  const isEstablished = org.applicationStatus === "RECOGNIZED";
   const isOfficer =
     user.role === "PRESIDENT" || user.role === "SECRETARY"
       ? org.members.some(
@@ -96,17 +113,46 @@ export default async function OrganizationDetailPage({
     .filter((a) => !a.isCurrent)
     .sort((x, y) => (y.endedAt?.getTime() ?? 0) - (x.endedAt?.getTime() ?? 0));
   const currentMembers = org.members.filter((m) => m.academicYear === ay);
-  const pendingMembers = currentMembers.filter((m) => m.status === "PENDING");
-  const approvedMembers = currentMembers.filter((m) => m.status !== "PENDING");
+  // §8 profile facts: current senior adviser and President, shown in the header.
+  const seniorAdviser = currentAdvisers.find((a) => a.type === "REGULAR" && a.isCurrent);
+  const president = currentMembers.find(
+    (m) => m.position === "PRESIDENT" && ["ACTIVE", "APPROVED"].includes(m.status)
+  );
+  const appliedMembers = currentMembers.filter((m) => m.status === "APPLIED");
+  const approvedMembers = currentMembers.filter((m) => ["ACTIVE", "APPROVED"].includes(m.status));
   const myMembership = currentMembers.find((m) => m.userId === user.id);
   const canApply =
     !myMembership &&
     ["MEMBER", "PRESIDENT", "SECRETARY"].includes(user.role) &&
-    org.status === "ACTIVE";
+    org.status === "ACTIVE" &&
+    isEstablished;
   const currentRec = org.recognitions.find((r) => r.academicYear === ay);
   const hasPriorRecognition = org.recognitions.some((r) =>
     ["APPROVED", "RECOGNIZED"].includes(r.status)
   );
+
+  // ---- §5 application workflow ---------------------------------------------
+  const hasSeniorAdviser = currentAdvisers.some((a) => a.type === "REGULAR" && a.isCurrent);
+  const isBoundSeniorAdviser =
+    user.role === "ADVISER_REGULAR" &&
+    currentAdvisers.some((a) => a.type === "REGULAR" && a.isCurrent && a.adviserId === user.id);
+  const appReviewerRole =
+    org.applicationStatus === "SUBMITTED" || org.applicationStatus === "UNDER_REVIEW"
+      ? ("ADVISER" as const)
+      : org.applicationStatus === "FOR_SIGNATURE"
+        ? ("DEAN" as const)
+        : org.applicationStatus === "FOR_APPROVAL"
+          ? ("SOA" as const)
+          : org.applicationStatus === "APPROVED"
+            ? ("OSAS" as const)
+            : null;
+  const canReviewApp =
+    (appReviewerRole === "ADVISER" && isBoundSeniorAdviser) ||
+    (appReviewerRole === "DEAN" && user.role === "DEAN") ||
+    (appReviewerRole === "SOA" && user.role === "SOA") ||
+    (appReviewerRole === "OSAS" && user.role === "OSAS");
+  const canOfficerEdit =
+    !isEstablished && (org.applicationStatus === "DRAFT" || org.applicationStatus === "RETURNED");
 
   const [adviserPool, studentPool] = canManage
     ? await Promise.all([
@@ -172,7 +218,7 @@ export default async function OrganizationDetailPage({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {isOfficer && !currentRec && (
+          {isOfficer && isEstablished && !currentRec && (
             <Link
               href={`/recognition/new?organizationId=${org.id}&kind=${hasPriorRecognition ? "RENEWAL" : "INITIAL"}`}
               className="inline-flex h-10 items-center gap-2 rounded-lg bg-primary px-4 text-sm font-semibold text-white shadow-sm hover:bg-primary-hover"
@@ -207,7 +253,7 @@ export default async function OrganizationDetailPage({
           >
             SF-004 Plan of Activities
           </a>
-          {canManage && (
+          {(canManage || (isOfficer && canOfficerEdit)) && (
             <>
               <Link
                 href={`/organizations/${org.id}/edit`}
@@ -216,24 +262,242 @@ export default async function OrganizationDetailPage({
                 <Pencil className="size-4" aria-hidden />
                 Edit
               </Link>
-              <QuickActionForm
-                action={setOrganizationStatus}
-                hidden={{ id: org.id, status: org.status === "ACTIVE" ? "INACTIVE" : "ACTIVE" }}
-                label={org.status === "ACTIVE" ? "Deactivate" : "Reactivate"}
-                confirmMessage={
-                  org.status === "ACTIVE"
-                    ? "Deactivate this organization? Historical records are preserved and the organization becomes view-only."
-                    : "Reactivate this organization?"
-                }
-              />
+              {canManage && (
+                <QuickActionForm
+                  action={setOrganizationStatus}
+                  hidden={{ id: org.id, status: org.status === "ACTIVE" ? "INACTIVE" : "ACTIVE" }}
+                  label={org.status === "ACTIVE" ? "Deactivate" : "Reactivate"}
+                  confirmMessage={
+                    org.status === "ACTIVE"
+                      ? "Deactivate this organization? Historical records are preserved and the organization becomes view-only."
+                      : "Reactivate this organization?"
+                  }
+                />
+              )}
             </>
           )}
         </div>
       </div>
 
+      {/* §8 profile facts at a glance — recognition period, senior adviser, president */}
+      <dl className="mb-6 grid grid-cols-1 gap-px overflow-hidden rounded-xl border border-line bg-line sm:grid-cols-3">
+        {(isEstablished || currentRec) && (
+          <div className="bg-surface px-4 py-3">
+            <dt className="text-[11px] font-bold uppercase tracking-wide text-content-muted">
+              Recognition · AY {ay}
+            </dt>
+            <dd className="mt-1">
+              {currentRec ? (
+                <Link
+                  href={`/recognition/${currentRec.id}`}
+                  className="inline-flex items-center gap-1.5 text-sm font-semibold text-content hover:text-primary"
+                >
+                  {RECOGNITION_STATUS_META[currentRec.status].label}
+                  <ArrowRight className="size-3.5 text-content-muted" aria-hidden />
+                </Link>
+              ) : (
+                <span className="text-sm text-content-secondary">Not filed for AY {ay}</span>
+              )}
+            </dd>
+          </div>
+        )}
+        <div className="bg-surface px-4 py-3">
+          <dt className="text-[11px] font-bold uppercase tracking-wide text-content-muted">
+            Senior Adviser
+          </dt>
+          <dd className="mt-1">
+            {seniorAdviser ? (
+              <span className="text-sm font-semibold text-content">{fullName(seniorAdviser.adviser)}</span>
+            ) : (
+              <span className="text-sm text-content-muted">Not assigned</span>
+            )}
+          </dd>
+        </div>
+        <div className="bg-surface px-4 py-3">
+          <dt className="text-[11px] font-bold uppercase tracking-wide text-content-muted">
+            President
+          </dt>
+          <dd className="mt-1">
+            {president ? (
+              <span className="text-sm font-semibold text-content">{fullName(president.user)}</span>
+            ) : (
+              <span className="text-sm text-content-muted">No officer yet</span>
+            )}
+          </dd>
+        </div>
+      </dl>
+
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* Left column */}
         <div className="space-y-6 lg:col-span-2">
+          {/* §5: Organization application — created by the President, reviewed
+              through the adviser → dean → SOA → OSAS chain before the
+              organization is recognized. */}
+          {!isEstablished && (
+            <Card>
+              <CardHeader
+                icon={ClipboardList}
+                title="Organization application"
+                description="Created and completed by the President. It passes through Senior Adviser → Dean → SOA → OSAS reviews before recognition is granted."
+              />
+              <CardContent className="space-y-4">
+                {org.applicationStatus === "RETURNED" || org.applicationStatus === "REJECTED" ? (
+                  <Alert
+                    tone={org.applicationStatus === "REJECTED" ? "danger" : "warning"}
+                    title={
+                      org.applicationStatus === "REJECTED"
+                        ? "Application disapproved"
+                        : "Revision required"
+                    }
+                  >
+                    {org.applicationRemark
+                      ? org.applicationRemark
+                      : "The reviewer did not leave a note."}
+                  </Alert>
+                ) : (
+                  <WorkflowSteps
+                    steps={ORG_APPLICATION_STEPS}
+                    currentIndex={orgApplicationStepIndex(org)}
+                  />
+                )}
+
+                {/* President / Secretary — complete and file the application */}
+                {isOfficer && canOfficerEdit && (
+                  <div className="flex flex-wrap items-center gap-2 border-t border-line pt-4">
+                    <Link
+                      href={`/organizations/${org.id}/edit`}
+                      className="inline-flex h-9 items-center gap-2 rounded-lg border border-line-strong bg-surface px-3.5 text-sm font-semibold text-content hover:border-primary"
+                    >
+                      <Pencil className="size-4" aria-hidden />
+                      Edit application
+                    </Link>
+                    <ActionForm
+                      action={submitOrgApplication}
+                      submitLabel="Submit for review"
+                      variant="primary"
+                      footerClassName="mt-0"
+                    >
+                      <input type="hidden" name="id" value={org.id} />
+                    </ActionForm>
+                    {org.applicationStatus === "DRAFT" && !hasSeniorAdviser && (
+                      <p className="w-full text-xs font-medium text-warning">
+                        Assign a Senior Adviser first — the application cannot be submitted until a
+                        Regular Faculty adviser is assigned.
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {/* Reviewer — advance, return, or reject the application */}
+                {canReviewApp && (
+                  <div className="border-t border-line pt-4">
+                    <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-content-muted">
+                      Your review ·{" "}
+                      {ORG_APPLICATION_STATUS_META[org.applicationStatus]?.label ??
+                        org.applicationStatus}
+                    </p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {appReviewerRole === "ADVISER" && org.applicationStatus === "SUBMITTED" && (
+                        <ActionForm
+                          action={startOrgReview}
+                          submitLabel="Start review"
+                          variant="primary"
+                          footerClassName="mt-0"
+                        >
+                          <input type="hidden" name="id" value={org.id} />
+                        </ActionForm>
+                      )}
+                      {appReviewerRole === "ADVISER" && org.applicationStatus === "UNDER_REVIEW" && (
+                        <ActionForm
+                          action={adviserApproveApplication}
+                          submitLabel="Approve & forward to Dean"
+                          variant="primary"
+                          footerClassName="mt-0"
+                        >
+                          <input type="hidden" name="id" value={org.id} />
+                        </ActionForm>
+                      )}
+                      {appReviewerRole === "DEAN" && (
+                        <ActionForm
+                          action={deanApproveApplication}
+                          submitLabel="Approve & forward to SOA"
+                          variant="primary"
+                          footerClassName="mt-0"
+                        >
+                          <input type="hidden" name="id" value={org.id} />
+                        </ActionForm>
+                      )}
+                      {appReviewerRole === "SOA" && (
+                        <ActionForm
+                          action={soaApproveApplication}
+                          submitLabel="Approve & recommend to OSAS"
+                          variant="primary"
+                          footerClassName="mt-0"
+                        >
+                          <input type="hidden" name="id" value={org.id} />
+                        </ActionForm>
+                      )}
+                      {appReviewerRole === "OSAS" && (
+                        <>
+                          <ActionForm
+                            action={conferOrgApplication}
+                            submitLabel="Confer recognition"
+                            variant="gold"
+                            footerClassName="mt-0"
+                          >
+                            <input type="hidden" name="id" value={org.id} />
+                          </ActionForm>
+                          <ActionForm
+                            action={rejectOrgApplication}
+                            submitLabel="Reject application"
+                            variant="danger"
+                            footerClassName="mt-0"
+                          >
+                            <input type="hidden" name="id" value={org.id} />
+                            <Field label="Reason for rejection" htmlFor={`org-reject-${org.id}`}>
+                              <Textarea
+                                id={`org-reject-${org.id}`}
+                                name="note"
+                                required
+                                rows={2}
+                                placeholder="Required — this is shown to the President."
+                              />
+                            </Field>
+                          </ActionForm>
+                        </>
+                      )}
+
+                      {/* Every reviewer may send it back for revision. */}
+                      <details className="rounded-lg border border-dashed border-line-strong px-3 py-2">
+                        <summary className="cursor-pointer text-xs font-semibold text-content-secondary">
+                          Return for revision…
+                        </summary>
+                        <ActionForm
+                          action={returnOrgApplication}
+                          submitLabel="Return for revision"
+                          variant="outline"
+                          footerClassName="mt-2"
+                          className="mt-3 space-y-3"
+                        >
+                          <input type="hidden" name="id" value={org.id} />
+                          <Field label="Reason" htmlFor={`org-return-${org.id}`}>
+                            <Textarea
+                              id={`org-return-${org.id}`}
+                              name="note"
+                              required
+                              rows={3}
+                              placeholder="What the President should revise before resubmitting…"
+                            />
+                          </Field>
+                        </ActionForm>
+                      </details>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
           {org.description && (
             <Card>
               <CardHeader icon={Landmark} title="About" />
@@ -364,19 +628,25 @@ export default async function OrganizationDetailPage({
             />
             <CardContent>
               {/* Pending applications awaiting officer review (§15) */}
-              {canManageMembers && pendingMembers.length > 0 && (
+              {canManageMembers && appliedMembers.length > 0 && (
                 <div className="mb-4 rounded-lg border border-warning/30 bg-warning-light/40 p-3">
                   <p className="text-xs font-semibold uppercase tracking-wide text-warning">
-                    Pending applications ({pendingMembers.length})
+                    Pending applications ({appliedMembers.length})
                   </p>
                   <ul className="mt-2 divide-y divide-warning/15">
-                    {pendingMembers.map((m) => (
+                    {appliedMembers.map((m) => (
                       <li key={m.id} className="flex items-center justify-between gap-3 py-2 first:pt-0 last:pb-0">
                         <div className="min-w-0">
                           <p className="truncate text-sm font-semibold text-content">{fullName(m.user)}</p>
                           <p className="truncate text-xs text-content-secondary">{m.user.email}</p>
                         </div>
                         <div className="flex shrink-0 items-center gap-2">
+                          <QuickActionForm
+                            action={reviewMembership}
+                            hidden={{ membershipId: m.id }}
+                            label="Review"
+                            variant="primary"
+                          />
                           <QuickActionForm
                             action={decideMembership}
                             hidden={{ membershipId: m.id, decision: "APPROVED" }}
@@ -398,7 +668,7 @@ export default async function OrganizationDetailPage({
               )}
 
               {approvedMembers.length === 0 ? (
-                <p className="text-sm text-content-muted">No approved members yet.</p>
+                <p className="text-sm text-content-muted">No registered members yet.</p>
               ) : (
                 <ul className="divide-y divide-line">
                   {approvedMembers.map((m) => (
@@ -419,8 +689,11 @@ export default async function OrganizationDetailPage({
                         </div>
                       </div>
                       <div className="flex shrink-0 items-center gap-2">
+                        <Badge tone={MEMBERSHIP_STATUS_META[m.status]?.tone ?? "neutral"}>
+                          {MEMBERSHIP_STATUS_META[m.status]?.label ?? m.status}
+                        </Badge>
                         <Chip>{MEMBER_POSITION_LABELS[m.position]}</Chip>
-                        {canManageMembers && (
+                        {canManageMembers && m.status === "ACTIVE" && (
                           <>
                             {/* §24: promote/demote inline — one President and
                                 one Secretary per year are enforced server-side. */}
@@ -447,13 +720,22 @@ export default async function OrganizationDetailPage({
                               </button>
                             </form>
                             <QuickActionForm
-                              action={removeMember}
+                              action={deactivateMembership}
                               hidden={{ membershipId: m.id }}
-                              label="Remove"
+                              label="Deactivate"
                               variant="ghost"
-                              confirmMessage={`Remove ${fullName(m.user)} from this organization?`}
+                              confirmMessage={`Deactivate ${fullName(m.user)}'s membership?`}
                             />
                           </>
+                        )}
+                        {canManageMembers && m.status === "ACTIVE" && (
+                          <QuickActionForm
+                            action={removeMember}
+                            hidden={{ membershipId: m.id }}
+                            label="Remove"
+                            variant="ghost"
+                            confirmMessage={`Remove ${fullName(m.user)} from this organization?`}
+                          />
                         )}
                       </div>
                     </li>
@@ -463,7 +745,7 @@ export default async function OrganizationDetailPage({
 
               {/* Student self-service application (§14-§15): students keep one
                   account across organizations; each membership is per org-year. */}
-              {myMembership?.status === "PENDING" && (
+              {myMembership?.status === "APPLIED" && (
                 <p className="mt-4 rounded-lg bg-warning-light px-3 py-2 text-sm text-warning" role="status">
                   Your membership application is awaiting officer review.
                 </p>

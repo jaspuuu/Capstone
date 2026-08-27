@@ -109,6 +109,7 @@ export default async function OrganizationsPage({
         name: true,
         acronym: true,
         status: true,
+        applicationStatus: true,
         type: true,
         collegeId: true,
         parentId: true,
@@ -191,6 +192,7 @@ export default async function OrganizationsPage({
   }
 
   const canManage = can(user, "org.manage");
+  const canCreate = can(user, "org.submit");
   const canExport = can(user, "analytics.view");
 
   // §14-§15: students hold one account across organizations. Beyond their own
@@ -202,7 +204,7 @@ export default async function OrganizationsPage({
   const [directory, myMemberships] = isStudent
     ? await Promise.all([
         db.organization.findMany({
-          where: { status: "ACTIVE", archivedAt: null, id: { notIn: scopedIds } },
+          where: { status: "ACTIVE", applicationStatus: "RECOGNIZED", archivedAt: null, id: { notIn: scopedIds } },
           select: {
             id: true,
             name: true,
@@ -250,7 +252,7 @@ export default async function OrganizationsPage({
                 </a>
               </>
             )}
-            {canManage && (
+            {canCreate && (
               <Link
                 href="/organizations/new"
                 className="inline-flex h-10 items-center gap-2 rounded-lg bg-primary px-4 text-sm font-semibold text-white shadow-sm hover:bg-primary-hover"
@@ -598,9 +600,9 @@ export default async function OrganizationsPage({
                         <span className="block max-w-32 truncate text-xs text-content-muted">{o.college.name}</span>
                       </TD>
                       <TD>
-                        {status === "PENDING" ? (
+                        {status === "APPLIED" ? (
                           <Badge tone="warning">Application pending</Badge>
-                        ) : status === "APPROVED" ? (
+                        ) : ["ACTIVE", "APPROVED"].includes(status ?? "") ? (
                           <Badge tone="success">Member</Badge>
                         ) : status === "REJECTED" ? (
                           <Badge tone="danger">Not approved</Badge>

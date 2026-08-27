@@ -226,7 +226,9 @@ async function main() {
   ) => {
     const existing = await prisma.organization.findFirst({ where: { acronym }, select: { id: true } });
     if (existing) return existing;
-    return prisma.organization.create({ data: { acronym, ...data } });
+    return prisma.organization.create({
+      data: { acronym, applicationStatus: "RECOGNIZED", ...data },
+    });
   };
 
   const ccsSbo = await mkOrg("CCS-SBO", {
@@ -411,7 +413,7 @@ async function main() {
     const daysAgo = (n: number) => new Date(now.getTime() - n * 86_400_000);
     const daysAhead = (n: number) => new Date(now.getTime() + n * 86_400_000);
 
-    // 1) Fully processed proposal + accepted report -> COMPLETED.
+    // 1) Fully processed proposal + accepted report -> ACCOMPLISHMENT phase.
     const assembly = await prisma.activityProposal.create({
       data: {
         organizationId: ccsSbo.id,
@@ -425,7 +427,8 @@ async function main() {
         estimatedBudget: 8500,
         expectedParticipants: 45,
         academicYear: AY_CUR,
-        status: "COMPLETED",
+        status: "APPROVED",
+        phase: "ACCOMPLISHMENT",
         submittedAt: daysAgo(38),
         decidedAt: daysAgo(35),
         decidedById: deanCcs.id,

@@ -11,6 +11,9 @@ import type { Prisma } from "@/generated/prisma/client";
 export type Permission =
   | "org.view"
   | "org.manage"
+  | "org.submit"
+  | "org.review"
+  | "org.approve"
   | "recognition.view"
   | "recognition.submit"
   | "renewal.submit"
@@ -27,18 +30,22 @@ export type Permission =
 
 const ORG_OFFICER: Permission[] = [
   "org.view",
+  "org.submit",
   "recognition.view",
   "recognition.submit",
   "renewal.submit",
   "activity.submit",
 ];
 
-const ADVISER: Permission[] = ["org.view", "recognition.view"];
+const ADVISER: Permission[] = ["org.view", "org.review", "recognition.view"];
 
 export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   OSAS: [
     "org.view",
     "org.manage",
+    "org.submit",
+    "org.review",
+    "org.approve",
     "recognition.view",
     "recognition.submit",
     "renewal.submit",
@@ -58,6 +65,9 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   SOA: [
     "org.view",
     "org.manage",
+    "org.submit",
+    "org.review",
+    "org.approve",
     "recognition.view",
     "recognition.review",
     "recognition.approve",
@@ -70,6 +80,8 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   ],
   DEAN: [
     "org.view",
+    "org.review",
+    "org.approve",
     "recognition.view",
     "recognition.review",
     "recognition.approve",

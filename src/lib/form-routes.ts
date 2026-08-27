@@ -35,3 +35,17 @@ export function formRoute(formKey: string): SignatoryRole[] {
 export function sfRouteEntityId(formKey: string, orgId: string, ay: string): string {
   return `${formKey}:${orgId}:${ay}`;
 }
+
+/** Signature-routed forms, in library order — shared by the document workflow
+ * tracker and the adviser "awaiting your signature" surface. */
+export const SIGNATURE_FORM_ORDER = ["SF001", "SF002", "SF003", "SF005"] as const;
+
+export const FORM_META: Record<
+  (typeof SIGNATURE_FORM_ORDER)[number],
+  { code: string; title: string; href: string }
+> = {
+  SF001: { code: "SF-001", title: "Application for Recognition/Renewal", href: "/forms/sf-001" },
+  SF002: { code: "SF-002", title: "Organization Renewal Form", href: "/forms/sf-002" },
+  SF003: { code: "SF-003", title: "Organization Adviser Commitment Form", href: "/forms/sf-003" },
+  SF005: { code: "SF-005", title: "List of Members", href: "/forms/sf-005" },
+};

@@ -49,7 +49,7 @@ export default async function AnalyticsPage() {
       college: { select: { name: true } },
       members: { where: { isCurrent: true }, select: { position: true } },
       recognitions: { select: { id: true, kind: true, academicYear: true, status: true } },
-      activities: { select: { academicYear: true, status: true, scope: true } },
+      activities: { select: { academicYear: true, status: true, phase: true, scope: true } },
       reports: { select: { academicYear: true, status: true } },
     },
   });
@@ -332,20 +332,17 @@ export default async function AnalyticsPage() {
         <CardHeader title="Organization compliance" description={`Per-organization indicators for AY ${ay}.`} />
         <CardContent>
           <TableWrap>
-            <table>
-              <THead>
-                <TR>
-                  <TH>Organization</TH>
-                  <TH>Members</TH>
-                  <TH>Officer ratio</TH>
-                  <TH>Recognition</TH>
-                  <TH>Plan & activities</TH>
-                  <TH>Reports</TH>
-                  <TH>Requirements</TH>
-                  <TH>Financial</TH>
-                  <TH>Risk</TH>
-                </TR>
-              </THead>
+            <THead>
+              <TH>Organization</TH>
+              <TH>Members</TH>
+              <TH>Officer ratio</TH>
+              <TH>Recognition</TH>
+              <TH>Plan & activities</TH>
+              <TH>Reports</TH>
+              <TH>Requirements</TH>
+              <TH>Financial</TH>
+              <TH>Risk</TH>
+            </THead>
               <tbody>
                 {rows.map((r) => {
                   const risk = risks.find((x) => x.orgId === r.id);
@@ -406,7 +403,6 @@ export default async function AnalyticsPage() {
                   </TR>
                 )}
               </tbody>
-            </table>
           </TableWrap>
         </CardContent>
       </Card>

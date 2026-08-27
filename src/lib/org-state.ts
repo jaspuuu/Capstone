@@ -1,10 +1,17 @@
 import type { Organization, Recognition } from "@/generated/prisma/client";
 import { compareAcademicYear, currentAcademicYear } from "@/lib/utils";
+import {
+  ACTIVITY_PHASES,
+  ORG_APPLICATION_WORKFLOW,
+  RECOGNITION_WORKFLOW,
+  REPORT_WORKFLOW,
+} from "@/lib/workflow";
 
 /**
- * The user-facing state of an organization derived from its recognition
- * history (§14): Active / Recognized / Pending Renewal / Expired / Inactive /
- * Rejected. Purely computed - never stored - so it can never drift.
+ * The user-facing state of an organization derived from its application
+ * lifecycle and recognition history (§5, §14): Draft / For Review / Revision
+ * Required / Recognized / Pending Renewal / etc. Purely computed - never
+ * stored - so it can never drift.
  */
 export type OrgState =
   | "RECOGNIZED"
@@ -12,15 +19,44 @@ export type OrgState =
   | "EXPIRED"
   | "INACTIVE"
   | "REJECTED"
-  | "ACTIVE";
+  | "ACTIVE"
+  | "DRAFT"
+  | "FOR_REVIEW"
+  | "REVISION_REQUIRED";
 
 const SATISFIED = new Set(["APPROVED", "RECOGNIZED"]);
 
+// Organization application statuses that mean "the application is in the
+// hands of reviewers" (as opposed to with the president).
+const IN_REVIEW = new Set([
+  "SUBMITTED",
+  "UNDER_REVIEW",
+  "FOR_SIGNATURE",
+  "FOR_APPROVAL",
+  "APPROVED",
+]);
+
 export function deriveOrgState(
-  org: Pick<Organization, "status">,
+  org: Pick<Organization, "status" | "applicationStatus">,
   recognitions: Pick<Recognition, "academicYear" | "status">[]
 ): OrgState {
   if (org.status === "INACTIVE") return "INACTIVE";
+
+  // §5: a freshly-created organization is not yet active/recognized. Only a
+  // RECOGNIZED application means the org is established; everything before
+  // that is the creation workflow, fronted by the President.
+  if (org.applicationStatus !== "RECOGNIZED") {
+    switch (org.applicationStatus) {
+      case "DRAFT":
+        return "DRAFT";
+      case "RETURNED":
+        return "REVISION_REQUIRED";
+      case "REJECTED":
+        return "REJECTED";
+      default:
+        return IN_REVIEW.has(org.applicationStatus) ? "FOR_REVIEW" : "DRAFT";
+    }
+  }
 
   const ay = currentAcademicYear();
   const sorted = [...recognitions].sort((a, b) =>
@@ -52,77 +88,66 @@ export function deriveOrgState(
   const latest = sorted[0];
   if (latest?.status === "REJECTED") return "REJECTED";
 
-  return "ACTIVE";
+  // An org whose application passed all reviews is established.
+  return "RECOGNIZED";
 }
 
-/** Workflow steps shown on the recognition progress bar (§13, §46). */
-export const RECOGNITION_STEPS = [
-  { key: "DRAFT", label: "Draft" },
-  { key: "SUBMITTED", label: "Submitted" },
-  { key: "UNDER_REVIEW", label: "Under Review" },
-  { key: "FOR_APPROVAL", label: "For Approval" },
-  { key: "RECOGNIZED", label: "Recognized" },
-] as const;
+/**
+ * §5: President-driven creation workflow shown on the organization page:
+ * create draft → submit → adviser review → dean review → SOA review → OSAS
+ * approval → recognized. RETURNED/REJECTED render as alerts instead of steps.
+ * Steps are derived from the shared workflow registry (§6).
+ */
+export const ORG_APPLICATION_STEPS = ORG_APPLICATION_WORKFLOW.steps.map((s) => ({
+  key: s.status,
+  label: s.label,
+}));
 
-/** Activity proposal pipeline: file → endorse → approve → (report accepted). */
-export const ACTIVITY_STEPS = [
-  { key: "DRAFT", label: "Draft" },
-  { key: "SUBMITTED", label: "Submitted" },
-  { key: "ENDORSED", label: "Endorsed" },
-  { key: "APPROVED", label: "Approved" },
-  { key: "COMPLETED", label: "Completed" },
-] as const;
-
-export function activityStepIndex(status: string): number {
-  switch (status) {
-    case "DRAFT":
-      return 0;
-    case "SUBMITTED":
-      return 1;
-    case "ENDORSED":
-      return 2;
-    case "APPROVED":
-      return 3;
-    case "COMPLETED":
-      return 4;
-    default:
-      return -1; // RETURNED / REJECTED render as alerts instead
-  }
+export function orgApplicationStepIndex(
+  org: Pick<Organization, "applicationStatus">
+): number {
+  return ORG_APPLICATION_WORKFLOW.steps.findIndex(
+    (s) => s.status === org.applicationStatus
+  );
 }
 
-export const REPORT_STEPS = [
-  { key: "DRAFT", label: "Draft" },
-  { key: "SUBMITTED", label: "Submitted" },
-  { key: "ACCEPTED", label: "Accepted" },
-] as const;
+/** Workflow steps shown on the recognition progress bar (§11, §29). */
+export const RECOGNITION_STEPS = RECOGNITION_WORKFLOW.steps.map((s) => ({
+  key: s.status,
+  label: s.label,
+}));
+
+/**
+ * Activity phase strip (§22): the phase dimension displayed on the activity
+ * page. Derived from the shared phase array; ACCOMPLISHMENT/ARCHIVE both rest
+ * on the last displayed step.
+ */
+const ACTIVITY_STRIP_KEYS = ["PLAN", "PROPOSAL", "APPROVAL", "IMPLEMENTATION", "ACCOMPLISHMENT"] as const;
+
+export const ACTIVITY_STEPS = ACTIVITY_PHASES.filter((s) =>
+  (ACTIVITY_STRIP_KEYS as readonly string[]).includes(s.status)
+).map((s) => ({ key: s.status, label: s.label }));
+
+export function activityStepIndex(phase: string): number {
+  const i = ACTIVITY_PHASES.findIndex((s) => s.status === phase);
+  if (i < 0) return -1;
+  return Math.min(i, ACTIVITY_STEPS.length - 1);
+}
+
+export const REPORT_STEPS = REPORT_WORKFLOW.steps.map((s) => ({
+  key: s.status,
+  label: s.label,
+}));
 
 export function reportStepIndex(status: string): number {
-  switch (status) {
-    case "DRAFT":
-      return 0;
-    case "SUBMITTED":
-      return 1;
-    case "ACCEPTED":
-      return 2;
-    default:
-      return -1; // RETURNED renders as an alert instead
-  }
+  return REPORT_WORKFLOW.steps.findIndex((s) => s.status === status);
 }
 
 export function recognitionStepIndex(status: string): number {
-  switch (status) {
-    case "DRAFT":
-      return 0;
-    case "SUBMITTED":
-      return 1;
-    case "UNDER_REVIEW":
-      return 2;
-    case "FOR_APPROVAL":
-      return 3;
-    case "APPROVED":
-    case "RECOGNIZED":
-      return 4;
-    default:
-      return -1; // RETURNED / REJECTED / EXPIRED render on the timeline instead
-  }
+  const i = RECOGNITION_WORKFLOW.steps.findIndex((s) => s.status === status);
+  if (i >= 0) return i;
+  // APPROVED sits just past the strip (conferral is the next action) — render
+  // it on the final recognized step, matching the legacy progress bar.
+  if (status === "APPROVED") return RECOGNITION_WORKFLOW.steps.length - 1;
+  return -1;
 }

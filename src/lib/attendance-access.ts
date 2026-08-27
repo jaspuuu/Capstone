@@ -10,7 +10,7 @@ import { isOfficerOf, type ParentRef } from "@/lib/attachment-access";
 
 /** Attendance is taken around event time - not while paperwork is in flight. */
 export function attendanceAllowedStatus(status: string): boolean {
-  return ["APPROVED", "COMPLETED"].includes(status);
+  return status === "APPROVED";
 }
 
 export function canManageAttendance(user: AuthUser, parent: ParentRef): boolean {

@@ -10,6 +10,7 @@ import { can } from "@/lib/auth/rbac";
 import { writeAudit } from "@/lib/audit";
 import { notifyOrgOfficers } from "@/lib/notifications";
 import { currentAcademicYear } from "@/lib/utils";
+import { REPORT_WORKFLOW } from "@/lib/workflow";
 
 export type ActionState = { error?: string; success?: string };
 
@@ -198,14 +199,17 @@ export async function updateReport(_prev: ActionState, formData: FormData): Prom
 // Lifecycle transitions
 // ---------------------------------------------------------------------------
 
+// §6/§24: report transitions live in the shared workflow registry — derived
+// here so the engine is the only source of truth.
 const TRANSITIONS: Record<
   "SUBMIT" | "RETURN" | "ACCEPT",
   { from: ReportStatus[]; to: ReportStatus; needNote?: boolean }
-> = {
-  SUBMIT: { from: ["DRAFT", "RETURNED"], to: "SUBMITTED" },
-  RETURN: { from: ["SUBMITTED"], to: "RETURNED", needNote: true },
-  ACCEPT: { from: ["SUBMITTED"], to: "ACCEPTED" },
-};
+> = Object.fromEntries(
+  REPORT_WORKFLOW.transitions.map((t) => [
+    t.action,
+    { from: [...t.from] as ReportStatus[], to: t.to, needNote: t.needNote },
+  ])
+) as Record<"SUBMIT" | "RETURN" | "ACCEPT", { from: ReportStatus[]; to: ReportStatus; needNote?: boolean }>;
 
 function transitionAction(transition: keyof typeof TRANSITIONS) {
   return async function action(_prev: ActionState, formData: FormData): Promise<ActionState> {
@@ -252,7 +256,7 @@ function transitionAction(transition: keyof typeof TRANSITIONS) {
       },
     });
 
-    // Accepting a linked report marks the activity COMPLETED.
+    // Accepting a linked report marks the activity as ACCOMPLISHED.
     if (transition === "ACCEPT" && report.activityProposalId) {
       const proposal = await db.activityProposal.findUnique({
         where: { id: report.activityProposalId },
@@ -260,7 +264,7 @@ function transitionAction(transition: keyof typeof TRANSITIONS) {
       if (proposal && proposal.status === "APPROVED") {
         await db.activityProposal.update({
           where: { id: proposal.id },
-          data: { status: "COMPLETED", decidedById: user.id, decidedAt: new Date() },
+          data: { phase: "ACCOMPLISHMENT", decidedById: user.id, decidedAt: new Date() },
         });
         await writeAudit({
           userId: user.id,
@@ -268,8 +272,8 @@ function transitionAction(transition: keyof typeof TRANSITIONS) {
           entityType: "ActivityProposal",
           entityId: proposal.id,
           entityLabel: proposal.title,
-          previousState: { status: "APPROVED" },
-          newState: { status: "COMPLETED", viaReportId: id },
+          previousState: { status: "APPROVED", phase: proposal.phase },
+          newState: { status: "APPROVED", phase: "ACCOMPLISHMENT", viaReportId: id },
         });
       }
     }

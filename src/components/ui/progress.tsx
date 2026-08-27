@@ -10,7 +10,7 @@ export function WorkflowSteps({
   currentIndex,
   className,
 }: {
-  steps: { key: string; label: string }[];
+  steps: readonly { key: string; label: string }[];
   /** Index of the current step; -1 renders nothing active. */
   currentIndex: number;
   className?: string;

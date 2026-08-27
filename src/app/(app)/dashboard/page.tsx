@@ -14,16 +14,27 @@ import { isAdminRole } from "@/lib/auth/rbac";
 import type { Role } from "@/generated/prisma/client";
 import { db } from "@/lib/db";
 import { getSelectedAy } from "@/lib/ay-server";
-import { formatDateTime, fullName, timeUntil } from "@/lib/utils";
+import { formatDate, formatDateTime, fullName, timeUntil } from "@/lib/utils";
 import {
   AUDIT_ACTION_LABELS,
   DEADLINE_PROCESS_LABELS,
+  ORG_APPLICATION_STATUS_META,
   ORG_STATE_META,
+  PROPOSAL_STATUS_META,
   RECOGNITION_STATUS_META,
   SHORT_ROLE_LABELS,
+  type BadgeTone,
 } from "@/lib/constants";
 import { deadlineStatus, listActiveDeadlines } from "@/lib/deadlines";
 import { deriveOrgState } from "@/lib/org-state";
+import { FORM_META, SIGNATORY_LABELS } from "@/lib/form-routes";
+import {
+  ACTIVITY_WORKFLOW,
+  currentAction,
+  inFlightStatuses,
+  ORG_APPLICATION_WORKFLOW,
+  RECOGNITION_WORKFLOW,
+} from "@/lib/workflow";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { StatCard } from "@/components/ui/stat-card";
 import { Badge } from "@/components/ui/badge";
@@ -45,10 +56,6 @@ export default async function DashboardPage() {
   }
   return <OfficerDashboard user={user} ay={ay} />;
 }
-
-// ---------------------------------------------------------------------------
-// Shared pieces
-// ---------------------------------------------------------------------------
 
 function greeting() {
   const h = new Date().getHours();
@@ -100,10 +107,6 @@ function DeadlineList({
   );
 }
 
-// ---------------------------------------------------------------------------
-// OSAS / SOA
-// ---------------------------------------------------------------------------
-
 async function AdminDashboard({
   user,
   ay,
@@ -119,6 +122,7 @@ async function AdminDashboard({
         name: true,
         acronym: true,
         status: true,
+        applicationStatus: true,
         collegeId: true,
         type: true,
         recognitions: { select: { academicYear: true, status: true } },
@@ -139,19 +143,52 @@ async function AdminDashboard({
   const states = orgs.map((o) => deriveOrgState(o, o.recognitions));
   const countStates = (s: string) => states.filter((x) => x === s).length;
 
-  const pendingQueue = await db.recognition.findMany({
-    where: { academicYear: ay, status: { in: ["SUBMITTED", "UNDER_REVIEW", "FOR_APPROVAL"] } },
-    include: {
-      organization: { select: { id: true, name: true, acronym: true } },
-    },
-    orderBy: { submittedAt: "asc" },
-    take: 6,
-  });
+  // §6/§28: the in-flight creation chain (adviser → dean → SOA → OSAS) is as
+  // much the reviewer's queue as recognition — surface both to OSAS. Applied
+  // memberships are officer-reviewed per org, but OSAS needs campus sight of
+  // the acceptance queue (read-only; officers act on their org pages).
+  const [pendingQueue, orgApplications, memberApplications] = await Promise.all([
+    db.recognition.findMany({
+      where: { academicYear: ay, status: { in: inFlightStatuses(RECOGNITION_WORKFLOW) } },
+      include: {
+        organization: { select: { id: true, name: true, acronym: true } },
+      },
+      orderBy: { submittedAt: "asc" },
+      take: 6,
+    }),
+    db.organization.findMany({
+      where: {
+        archivedAt: null,
+        applicationStatus: { in: inFlightStatuses(ORG_APPLICATION_WORKFLOW) },
+      },
+      select: {
+        id: true,
+        name: true,
+        acronym: true,
+        applicationStatus: true,
+        college: { select: { name: true } },
+      },
+      orderBy: { updatedAt: "asc" },
+      take: 6,
+    }),
+    db.organizationMember.findMany({
+      where: {
+        academicYear: ay,
+        status: "APPLIED",
+        organization: { archivedAt: null },
+      },
+      include: {
+        user: { select: { firstName: true, lastName: true } },
+        organization: { select: { id: true, name: true, acronym: true } },
+      },
+      orderBy: { joinedAt: "asc" },
+      take: 6,
+    }),
+  ]);
 
   const recognizedCount = countStates("RECOGNIZED");
-  const pendingCount = recognitions.filter((r) =>
-    ["SUBMITTED", "UNDER_REVIEW", "FOR_APPROVAL"].includes(r.status)
-  ).length;
+  const inFlight = inFlightStatuses(RECOGNITION_WORKFLOW);
+  const pendingCount = recognitions.filter((r) => inFlight.includes(r.status)).length;
 
   // Distribution bars for org states.
   const distribution = (["RECOGNIZED", "PENDING_RENEWAL", "ACTIVE", "EXPIRED", "REJECTED", "INACTIVE"] as const)
@@ -192,55 +229,151 @@ async function AdminDashboard({
           <CardHeader
             icon={ClipboardCheck}
             title="Pending actions"
-            description="Applications that need review or approval"
+            description="Work in flight across organization creation, recognition, and membership"
             actions={
-              <Link href="/recognition" className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline">
-                View all <ArrowRight className="size-3.5" aria-hidden />
-              </Link>
+              <div className="flex items-center gap-3">
+                <Link href="/organizations" className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline">
+                  Organizations <ArrowRight className="size-3.5" aria-hidden />
+                </Link>
+                <Link href="/recognition" className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline">
+                  Recognition <ArrowRight className="size-3.5" aria-hidden />
+                </Link>
+              </div>
             }
           />
-          {pendingQueue.length === 0 ? (
+          {orgApplications.length === 0 && pendingQueue.length === 0 && memberApplications.length === 0 ? (
             <EmptyState
               title="All caught up"
               description="No applications are waiting for review right now."
               className="border-0"
             />
           ) : (
-            <TableWrap>
-              <THead>
-                <TH>Organization</TH>
-                <TH>Type</TH>
-                <TH>Status</TH>
-                <TH>Submitted</TH>
-                <TH />
-              </THead>
-              <tbody>
-                {pendingQueue.map((r) => (
-                  <TR key={r.id}>
-                    <TD>
-                      <Link href={`/recognition/${r.id}`} className="font-semibold text-primary hover:underline">
-                        {r.organization.acronym ?? r.organization.name}
-                      </Link>
-                      <span className="block text-xs text-content-secondary">{r.organization.name}</span>
-                    </TD>
-                    <TD className="text-content-secondary">{r.kind === "RENEWAL" ? "Renewal" : "Initial"}</TD>
-                    <TD>
-                      <Badge tone={RECOGNITION_STATUS_META[r.status].tone}>
-                        {RECOGNITION_STATUS_META[r.status].label}
-                      </Badge>
-                    </TD>
-                    <TD className="text-xs whitespace-nowrap text-content-secondary">
-                      {formatDateTime(r.submittedAt)}
-                    </TD>
-                    <TD>
-                      <Link href={`/recognition/${r.id}`} className="text-xs font-semibold text-primary hover:underline">
-                        Review
-                      </Link>
-                    </TD>
-                  </TR>
-                ))}
-              </tbody>
-            </TableWrap>
+            <>
+              {orgApplications.length > 0 && (
+                <section aria-label="Organization applications" className="border-t border-line">
+                  <p className="px-5 pt-3 pb-1 text-[11px] font-bold uppercase tracking-wider text-content-secondary">
+                    Organization applications
+                  </p>
+                  <TableWrap>
+                    <THead>
+                      <TH>Organization</TH>
+                      <TH>Responsible</TH>
+                      <TH>Status</TH>
+                      <TH />
+                    </THead>
+                    <tbody>
+                      {orgApplications.map((o) => {
+                        const gate = currentAction(ORG_APPLICATION_WORKFLOW, o.applicationStatus);
+                        return (
+                          <TR key={o.id}>
+                            <TD>
+                              <Link href={`/organizations/${o.id}`} className="font-semibold text-primary hover:underline">
+                                {o.acronym ?? o.name}
+                              </Link>
+                              <span className="block text-xs text-content-secondary">{o.college.name}</span>
+                            </TD>
+                            <TD className="text-xs text-content-secondary">{gate?.roleLabel ?? "—"}</TD>
+                            <TD>
+                              <Badge tone={ORG_APPLICATION_STATUS_META[o.applicationStatus].tone}>
+                                {ORG_APPLICATION_STATUS_META[o.applicationStatus].label}
+                              </Badge>
+                            </TD>
+                            <TD>
+                              <Link href={`/organizations/${o.id}`} className="text-xs font-semibold text-primary hover:underline">
+                                Review
+                              </Link>
+                            </TD>
+                          </TR>
+                        );
+                      })}
+                    </tbody>
+                  </TableWrap>
+                </section>
+              )}
+              {pendingQueue.length > 0 && (
+                <section aria-label="Recognition applications" className="border-t border-line">
+                  <p className="px-5 pt-3 pb-1 text-[11px] font-bold uppercase tracking-wider text-content-secondary">
+                    Recognition applications
+                  </p>
+                  <TableWrap>
+                    <THead>
+                      <TH>Organization</TH>
+                      <TH>Type</TH>
+                      <TH>Status</TH>
+                      <TH>Submitted</TH>
+                      <TH />
+                    </THead>
+                    <tbody>
+                      {pendingQueue.map((r) => (
+                        <TR key={r.id}>
+                          <TD>
+                            <Link href={`/recognition/${r.id}`} className="font-semibold text-primary hover:underline">
+                              {r.organization.acronym ?? r.organization.name}
+                            </Link>
+                            <span className="block text-xs text-content-secondary">{r.organization.name}</span>
+                          </TD>
+                          <TD className="text-content-secondary">{r.kind === "RENEWAL" ? "Renewal" : "Initial"}</TD>
+                          <TD>
+                            <Badge tone={RECOGNITION_STATUS_META[r.status].tone}>
+                              {RECOGNITION_STATUS_META[r.status].label}
+                            </Badge>
+                          </TD>
+                          <TD className="text-xs whitespace-nowrap text-content-secondary">
+                            {formatDateTime(r.submittedAt)}
+                          </TD>
+                          <TD>
+                            <Link href={`/recognition/${r.id}`} className="text-xs font-semibold text-primary hover:underline">
+                              Review
+                            </Link>
+                          </TD>
+                        </TR>
+                      ))}
+                    </tbody>
+                  </TableWrap>
+                </section>
+              )}
+              {memberApplications.length > 0 && (
+                <section aria-label="Membership applications" className="border-t border-line">
+                  <p className="px-5 pt-3 pb-1 text-[11px] font-bold uppercase tracking-wider text-content-secondary">
+                    Membership applications
+                  </p>
+                  <TableWrap>
+                    <THead>
+                      <TH>Applicant</TH>
+                      <TH>Organization</TH>
+                      <TH>Submitted</TH>
+                      <TH />
+                    </THead>
+                    <tbody>
+                      {memberApplications.map((m) => (
+                        <TR key={m.id}>
+                          <TD>
+                            <p className="text-sm font-semibold text-content">
+                              {m.user.firstName} {m.user.lastName}
+                            </p>
+                            <p className="text-xs text-content-secondary">Awaiting officer review</p>
+                          </TD>
+                          <TD>
+                            <Link href={`/organizations/${m.organization.id}`} className="font-semibold text-primary hover:underline">
+                              {m.organization.acronym ?? m.organization.name}
+                            </Link>
+                            <span className="block text-xs text-content-secondary">{m.organization.name}</span>
+                          </TD>
+                          <TD className="text-xs whitespace-nowrap text-content-secondary">
+                            {formatDate(m.joinedAt)}
+                          </TD>
+                          <TD>
+                            <Link href={`/organizations/${m.organization.id}`} className="text-xs font-semibold text-primary hover:underline">
+                              Review
+                            </Link>
+                          </TD>
+                        </TR>
+                      ))}
+                    </tbody>
+                  </TableWrap>
+                </section>
+              )}
+            </>
           )}
         </Card>
 
@@ -301,24 +434,20 @@ async function AdminDashboard({
   );
 }
 
-// ---------------------------------------------------------------------------
-// Dean
-// ---------------------------------------------------------------------------
-
 async function DeanDashboard({ user, ay }: { user: { id: string; collegeId: string | null; firstName: string }; ay: string }) {
   const collegeId = user.collegeId;
   const [orgs, pending, deadlines] = await Promise.all([
     db.organization.findMany({
       where: { archivedAt: null, collegeId: collegeId ?? "__none__" },
       select: {
-        id: true, name: true, acronym: true, status: true, collegeId: true, type: true,
+        id: true, name: true, acronym: true, status: true, applicationStatus: true, collegeId: true, type: true,
         recognitions: { select: { academicYear: true, status: true } },
       },
     }),
     db.recognition.findMany({
       where: {
         academicYear: ay,
-        status: { in: ["SUBMITTED", "UNDER_REVIEW", "FOR_APPROVAL"] },
+        status: { in: inFlightStatuses(RECOGNITION_WORKFLOW) },
         organization: { collegeId: collegeId ?? "__none__" },
       },
       include: { organization: { select: { id: true, name: true, acronym: true } } },
@@ -373,17 +502,13 @@ async function DeanDashboard({ user, ay }: { user: { id: string; collegeId: stri
   );
 }
 
-// ---------------------------------------------------------------------------
-// Advisers
-// ---------------------------------------------------------------------------
-
 async function AdviserDashboard({ user, ay }: { user: { id: string; firstName: string }; ay: string }) {
   const assignments = await db.adviserAssignment.findMany({
     where: { adviserId: user.id, isCurrent: true },
     include: {
       organization: {
         select: {
-          id: true, name: true, acronym: true, status: true, collegeId: true, type: true,
+          id: true, name: true, acronym: true, status: true, applicationStatus: true, collegeId: true, type: true,
           recognitions: { select: { academicYear: true, status: true } },
         },
       },
@@ -392,12 +517,182 @@ async function AdviserDashboard({ user, ay }: { user: { id: string; firstName: s
 
   const deadlines = await listActiveDeadlines();
 
+  // §6/§28: only the current REGULAR (senior) adviser is responsible for
+  // recognition starts/reviews and activity endorsements — PART_TIME advisers
+  // are excluded exactly as the server actions enforce. SF signature steps,
+  // however, are type-aware (SENIOR vs JUNIOR), so those are scoped per org.
+  const seniorAssignments = assignments.filter((a) => a.type === "REGULAR");
+  const seniorOrgIds = seniorAssignments.map((a) => a.organizationId);
+  const allOrgIds = [...new Set(assignments.map((a) => a.organizationId))];
+  const orgIdTypes = new Map(assignments.map((a) => [a.organizationId, a.type]));
+  const orgInfo = new Map(
+    assignments.map((a) => [
+      a.organizationId,
+      { acronym: a.organization.acronym ?? a.organization.name, name: a.organization.name },
+    ])
+  );
+  const [pendingRecognitions, pendingProposals, signingRoutes] =
+    seniorOrgIds.length > 0
+      ? await Promise.all([
+          db.recognition.findMany({
+            where: {
+              academicYear: ay,
+              status: { in: ["SUBMITTED", "UNDER_REVIEW"] },
+              organizationId: { in: seniorOrgIds },
+            },
+            include: { organization: { select: { id: true, name: true, acronym: true } } },
+            orderBy: { submittedAt: "asc" },
+          }),
+          db.activityProposal.findMany({
+            where: { status: "SUBMITTED", organizationId: { in: seniorOrgIds } },
+            include: { organization: { select: { id: true, name: true, acronym: true } } },
+            orderBy: { submittedAt: "asc" },
+          }),
+          db.signatureRoute.findMany({
+            where: {
+              entityType: "SF",
+              OR: allOrgIds.map((orgId) => ({ entityId: { endsWith: `:${orgId}:${ay}` } })),
+            },
+            include: { steps: { orderBy: { order: "asc" } } },
+          }),
+        ])
+      : [[], [], []];
+
+  type PendingItem = {
+    id: string;
+    href: string;
+    orgHref: string;
+    orgAcronym: string;
+    orgName: string;
+    kind: string;
+    detail: string;
+    statusLabel: string;
+    statusTone: BadgeTone;
+    roleLabel: string;
+    action: string;
+  };
+
+  const pendingItems: PendingItem[] = [];
+  for (const r of pendingRecognitions) {
+    const gate = currentAction(RECOGNITION_WORKFLOW, r.status);
+    pendingItems.push({
+      id: r.id,
+      href: `/recognition/${r.id}`,
+      orgHref: `/organizations/${r.organization.id}`,
+      orgAcronym: r.organization.acronym ?? r.organization.name,
+      orgName: r.organization.name,
+      kind: r.kind === "RENEWAL" ? "Recognition renewal" : "Recognition application",
+      detail: `AY ${r.academicYear}`,
+      statusLabel: RECOGNITION_STATUS_META[r.status].label,
+      statusTone: RECOGNITION_STATUS_META[r.status].tone,
+      roleLabel: gate?.roleLabel ?? "—",
+      action: gate?.action ?? "Review",
+    });
+  }
+  for (const p of pendingProposals) {
+    const gate = currentAction(ACTIVITY_WORKFLOW, p.status);
+    pendingItems.push({
+      id: p.id,
+      href: `/activities/${p.id}`,
+      orgHref: `/organizations/${p.organization.id}`,
+      orgAcronym: p.organization.acronym ?? p.organization.name,
+      orgName: p.organization.name,
+      kind: "Activity proposal",
+      detail: p.title,
+      statusLabel: PROPOSAL_STATUS_META[p.status].label,
+      statusTone: PROPOSAL_STATUS_META[p.status].tone,
+      roleLabel: gate?.roleLabel ?? "—",
+      action: gate?.action ?? "Review",
+    });
+  }
+
+  // §28: SF signature routes where this adviser is the CURRENT signatory
+  // (step role must match their assignment type), e.g. "SF-002 is waiting on
+  // the Senior Adviser". Routes are lazy — a missing route means not started.
+  for (const route of signingRoutes) {
+    if (route.state !== "IN_PROGRESS") continue;
+    const current = route.steps.find((s) => s.status === "CURRENT");
+    if (!current) continue;
+    const [, routeOrgId] = route.entityId.split(":");
+    const adviserType = orgIdTypes.get(routeOrgId ?? "");
+    const expectedRole =
+      adviserType === "REGULAR"
+        ? ("SENIOR_ADVISER" as const)
+        : adviserType === "PART_TIME"
+          ? ("JUNIOR_ADVISER" as const)
+          : null;
+    if (!expectedRole || current.role !== expectedRole) continue;
+    const meta = FORM_META[route.formKey as keyof typeof FORM_META];
+    if (!meta) continue;
+    const info = orgInfo.get(routeOrgId ?? "") ?? { acronym: "", name: "" };
+    pendingItems.push({
+      id: route.id,
+      href: `${meta.href}?org=${routeOrgId}&ay=${encodeURIComponent(ay)}`,
+      orgHref: `/organizations/${routeOrgId}`,
+      orgAcronym: info.acronym,
+      orgName: info.name,
+      kind: `Signature · ${meta.code}`,
+      detail: meta.title,
+      statusLabel: "Awaiting your signature",
+      statusTone: "warning",
+      roleLabel: SIGNATORY_LABELS[current.role],
+      action: "Review & sign",
+    });
+  }
+
   return (
     <>
       <PageHeader
         title={`${greeting()}, ${user.firstName}`}
         description="Organizations where you serve as faculty adviser."
       />
+
+      {pendingItems.length > 0 && (
+        <Card className="mb-6">
+          <CardHeader
+            icon={ClipboardCheck}
+            title="Awaiting your action"
+            description="Documents awaiting the adviser's review or signature"
+          />
+          <TableWrap>
+            <THead>
+              <TH>Document</TH>
+              <TH>Organization</TH>
+              <TH>Status</TH>
+              <TH>Next step</TH>
+              <TH />
+            </THead>
+            <tbody>
+              {pendingItems.map((it) => (
+                <TR key={it.id}>
+                  <TD>
+                    <p className="text-sm font-semibold text-content">{it.kind}</p>
+                    <p className="truncate text-xs text-content-secondary">{it.detail}</p>
+                  </TD>
+                  <TD>
+                    <Link href={it.orgHref} className="font-semibold text-primary hover:underline">
+                      {it.orgAcronym}
+                    </Link>
+                    <span className="block max-w-52 truncate text-xs text-content-secondary">{it.orgName}</span>
+                  </TD>
+                  <TD>
+                    <Badge tone={it.statusTone}>{it.statusLabel}</Badge>
+                  </TD>
+                  <TD className="text-xs text-content-secondary">
+                    <span className="block font-semibold text-content">{it.roleLabel}</span>
+                    {it.action}
+                  </TD>
+                  <TD>
+                    <Link href={it.href} className="text-xs font-semibold text-primary hover:underline">
+                      Act now
+                    </Link>
+                  </TD>
+                </TR>
+              ))}
+            </tbody>
+          </TableWrap>
+        </Card>
+      )}
 
       {assignments.length === 0 ? (
         <EmptyState
@@ -444,17 +739,13 @@ async function AdviserDashboard({ user, ay }: { user: { id: string; firstName: s
   );
 }
 
-// ---------------------------------------------------------------------------
-// Officers & members
-// ---------------------------------------------------------------------------
-
 async function OfficerDashboard({ user, ay }: { user: { id: string; firstName: string; role: string }; ay: string }) {
   const memberships = await db.organizationMember.findMany({
     where: { userId: user.id, isCurrent: true },
     include: {
       organization: {
         select: {
-          id: true, name: true, acronym: true, description: true, status: true, collegeId: true, type: true,
+          id: true, name: true, acronym: true, description: true, status: true, applicationStatus: true, collegeId: true, type: true,
           college: { select: { name: true, code: true } },
           recognitions: {
             orderBy: { academicYear: "desc" },
@@ -546,7 +837,7 @@ async function OfficerDashboard({ user, ay }: { user: { id: string; firstName: s
                         )}
                       </Link>
                     )}
-                    {isOfficer && currentRec && ["DRAFT", "RETURNED"].includes(currentRec.status) && (
+                    {isOfficer && currentRec && RECOGNITION_WORKFLOW.editableStates.includes(currentRec.status) && (
                       <Link
                         href={`/recognition/${currentRec.id}`}
                         className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-lg bg-gold px-3 text-xs font-semibold text-primary-dark hover:bg-gold-dark hover:text-white"

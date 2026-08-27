@@ -33,7 +33,7 @@ export type OrgSnapshot = {
   collegeName: string | null;
   members: { position: string }[];
   recognitions: { kind: RecognitionKind; academicYear: string; status: RecognitionStatus }[];
-  activities: { academicYear: string; status: string; scope: ActivityScope }[];
+  activities: { academicYear: string; status: string; phase: string | null; scope: ActivityScope }[];
   reports: { academicYear: string; status: ReportStatus }[];
   /** Tagged SF-001 checklist files on this org's recognitions, by AY. */
   requirementFiles: { kind: AttachmentKind; academicYear: string; createdAt: Date }[];
@@ -51,7 +51,7 @@ export type DeadlineLite = {
 
 const SATISFIED_RECOGNITION: RecognitionStatus[] = ["APPROVED", "RECOGNIZED"];
 const FILED_RECOGNITION: RecognitionStatus[] = [
-  "SUBMITTED", "UNDER_REVIEW", "FOR_APPROVAL", "APPROVED", "RECOGNIZED",
+  "SUBMITTED", "UNDER_REVIEW", "FOR_APPROVAL", "FOR_SIGNATURE", "APPROVED", "RECOGNIZED",
 ];
 const FILED_REPORT: ReportStatus[] = ["SUBMITTED", "ACCEPTED"];
 
@@ -116,7 +116,7 @@ export function describeOrg(o: OrgSnapshot, ay: string): OrgDescriptive {
     recognitionSatisfied: satisfied,
     activitiesFiled: acts.length,
     activitiesApprovedUp: acts.filter((a) =>
-      ["APPROVED", "COMPLETED"].includes(a.status)
+      a.status === "APPROVED" || ["ACCOMPLISHMENT", "ARCHIVE"].includes(a.phase ?? "")
     ).length,
     reportsAccepted: reps.filter((r) => r.status === "ACCEPTED").length,
     reportsFiled: reps.filter((r) => FILED_REPORT.includes(r.status)).length,
@@ -252,7 +252,7 @@ export function financialCompliance(
 
 export function planOfActivitiesStatus(o: OrgSnapshot, ay: string): PlanStatus {
   const acts = o.activities.filter((a) => a.academicYear === ay);
-  if (acts.some((a) => ["APPROVED", "COMPLETED"].includes(a.status))) return "APPROVED";
+  if (acts.some((a) => a.status === "APPROVED" || ["ACCOMPLISHMENT", "ARCHIVE"].includes(a.phase ?? ""))) return "APPROVED";
   if (acts.some((a) => ["SUBMITTED", "ENDORSED"].includes(a.status))) return "FILED";
   if (acts.length > 0) return "DRAFT_ONLY";
   if (o.requirementFiles.some((f) => f.academicYear === ay && f.kind === "PLAN_OF_ACTIVITIES")) {

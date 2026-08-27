@@ -13,11 +13,7 @@ import { ActionForm } from "@/components/action-form";
 
 export const metadata: Metadata = { title: "Check-in" };
 
-/**
- * Landing page for a scanned QR code. The token in the URL proves the member
- * is physically at the venue; login, membership and an open window are still
- * enforced by the server action.
- */
+
 export default async function CheckInPage({
   params,
   searchParams,

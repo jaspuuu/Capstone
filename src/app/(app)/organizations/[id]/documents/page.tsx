@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { CheckCircle2, CircleDashed, Download, FileStack, Trash2 } from "lucide-react";
+import { CheckCircle2, CircleDashed, Download, FileStack, Trash2, Workflow } from "lucide-react";
 import { requireUser } from "@/lib/auth/guards";
 import { orgScopeWhere } from "@/lib/auth/rbac";
 import { db } from "@/lib/db";
@@ -17,12 +17,14 @@ import {
   type ParentRef,
 } from "@/lib/attachment-access";
 import { ATTACHMENT_KIND_LABELS, type AttachmentKind } from "@/lib/attachments";
-import { REQUIREMENT_STATUS_META } from "@/lib/constants";
+import { FORM_META, SIGNATURE_FORM_ORDER, SIGNATORY_LABELS } from "@/lib/form-routes";
+import { REQUIREMENT_STATUS_META, type BadgeTone } from "@/lib/constants";
 import { formatDate } from "@/lib/utils";
 import { getSelectedAy } from "@/lib/ay-server";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
+import { TableWrap, THead, TH, TR, TD } from "@/components/ui/table";
 import { ActionForm, QuickActionForm } from "@/components/action-form";
 import { deleteAttachment, updateAttachmentKind, uploadAttachment } from "@/lib/actions/attachments";
 
@@ -36,6 +38,13 @@ function fmtSize(bytes: number) {
 
 const FILE_ACCEPT =
   ".pdf,.png,.jpg,.jpeg,.webp,.docx,application/pdf,image/png,image/jpeg,image/webp,application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+const ROUTE_STATE_BADGE: Record<string, { tone: BadgeTone; label: string }> = {
+  IN_PROGRESS: { tone: "warning", label: "In progress" },
+  COMPLETED: { tone: "success", label: "Completed" },
+  RETURNED_FOR_REVISION: { tone: "orange", label: "Revision required" },
+  REJECTED: { tone: "danger", label: "Rejected" },
+};
 
 export default async function OrganizationDocumentsPage({
   params,
@@ -116,6 +125,20 @@ export default async function OrganizationDocumentsPage({
   const reportEvidence = reports.filter(
     (r) => r.academicYear === ay && ["SUBMITTED", "ACCEPTED"].includes(r.status)
   );
+
+  // §13: every routed SF form for this org + AY, so the page can answer
+  // "where is my document?" Routes are lazily created the first time a form
+  // is opened, so missing routes just mean "not started yet".
+  const routes = await db.signatureRoute.findMany({
+    where: { entityType: "SF", entityId: { endsWith: `:${org.id}:${ay}` } },
+    include: {
+      steps: {
+        orderBy: { order: "asc" },
+        include: { signer: { select: { firstName: true, lastName: true } } },
+      },
+    },
+  });
+  const routeByForm = new Map(routes.map((r) => [r.formKey, r]));
 
   return (
     <>
@@ -392,6 +415,85 @@ export default async function OrganizationDocumentsPage({
           </Card>
         </div>
       </div>
+
+      {/* §13: document workflow visibility — where is my document right now? */}
+      <Card className="mt-6">
+        <CardHeader
+          icon={Workflow}
+          title="Document workflow"
+          description={`Signature routing for this organization's filed forms (AY ${ay}). Open a form to sign or return it.`}
+        />
+        <TableWrap>
+          <THead>
+            <TH>Form</TH>
+            <TH>Routing</TH>
+            <TH>Where it is now</TH>
+            <TH />
+          </THead>
+          <tbody>
+            {SIGNATURE_FORM_ORDER.map((key) => {
+              const t = FORM_META[key];
+              const route = routeByForm.get(key);
+              const badge = route ? ROUTE_STATE_BADGE[route.state] : null;
+              const current = route?.steps.find((s) => s.status === "CURRENT");
+              const signedCount = route?.steps.filter((s) => s.status === "SIGNED").length ?? 0;
+              const total = route?.steps.length ?? 0;
+              return (
+                <TR key={t.code}>
+                  <TD>
+                    <p className="text-sm font-semibold text-content">{t.code}</p>
+                    <p className="max-w-xs truncate text-xs text-content-secondary">{t.title}</p>
+                  </TD>
+                  <TD className="text-xs">
+                    <Badge tone={badge ? badge.tone : "neutral"}>
+                      {badge ? badge.label : "Not started"}
+                    </Badge>
+                  </TD>
+                  <TD className="text-xs text-content-secondary">
+                    {route && route.state === "IN_PROGRESS" && current ? (
+                      <>
+                        <span className="font-semibold text-content">
+                          Waiting on {SIGNATORY_LABELS[current.role]}
+                        </span>
+                        {current.signer && (
+                          <span className="ml-1">
+                            — {current.signer.firstName} {current.signer.lastName}
+                          </span>
+                        )}
+                        <span className="block text-content-muted">
+                          {signedCount} of {total} signatures completed
+                        </span>
+                      </>
+                    ) : route && route.state === "COMPLETED" ? (
+                      <span className="font-medium text-content">
+                        All {total} signatories completed
+                      </span>
+                    ) : route && route.state === "RETURNED_FOR_REVISION" ? (
+                      <span className="font-medium text-warning">
+                        Returned for revision — fix it and resubmit
+                      </span>
+                    ) : route && route.state === "REJECTED" ? (
+                      <span className="font-medium text-danger">Document rejected</span>
+                    ) : (
+                      <span className="text-content-muted">
+                        {signedCount} of {total} signatures · no active step
+                      </span>
+                    )}
+                  </TD>
+                  <TD>
+                    <Link
+                      href={`${t.href}?org=${org.id}&ay=${encodeURIComponent(ay)}`}
+                      className="text-xs font-semibold text-primary hover:underline"
+                    >
+                      Open form
+                    </Link>
+                  </TD>
+                </TR>
+              );
+            })}
+          </tbody>
+        </TableWrap>
+      </Card>
     </>
   );
 }

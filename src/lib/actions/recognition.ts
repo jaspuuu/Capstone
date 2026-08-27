@@ -10,6 +10,12 @@ import { can } from "@/lib/auth/rbac";
 import { writeAudit } from "@/lib/audit";
 import { notifyOrgOfficers } from "@/lib/notifications";
 import { currentAcademicYear, formatDateTime, nextAcademicYear } from "@/lib/utils";
+import { RECOGNITION_WORKFLOW } from "@/lib/workflow";
+import {
+  ATTACHMENT_KIND_LABELS,
+  ATTACHMENT_KINDS,
+  type AttachmentKind,
+} from "@/lib/attachments";
 
 export type ActionState = { error?: string; success?: string };
 
@@ -60,6 +66,43 @@ async function recordEvent(
   await db.recognitionEvent.create({
     data: { recognitionId, actorId, action, fromStatus: from, toStatus: to, note: note ?? null },
   });
+}
+
+/**
+ * §5: the SF-001 checklist gate. The application/renewal letter is the
+ * submission itself so it is not checked here; the other six accreditation
+ * documents must be present (uploaded against this recognition, or — for
+ * accomplishment reports — satisfied by first-class filed reports) before the
+ * application may be submitted. Returns the labels of the missing items.
+ */
+const FILED_REPORT_STATUSES = ["SUBMITTED", "ACCEPTED"] as const;
+
+async function missingChecklistRequirements(
+  recognitionId: string,
+  organizationId: string,
+  academicYear: string
+): Promise<string[]> {
+  const [tagged, filedReports] = await Promise.all([
+    db.attachment.findMany({
+      where: { entityType: "Recognition", entityId: recognitionId },
+      select: { kind: true },
+    }),
+    db.accomplishmentReport.count({
+      where: {
+        organizationId,
+        academicYear,
+        status: { in: [...FILED_REPORT_STATUSES] },
+      },
+    }),
+  ]);
+  const kinds = new Set(
+    tagged.map((a) => a.kind).filter((k): k is AttachmentKind => k !== null)
+  );
+  return ATTACHMENT_KINDS.filter((k) => {
+    if (kinds.has(k)) return false;
+    if (k === "ACCOMPLISHMENT_REPORTS" && filedReports > 0) return false;
+    return true;
+  }).map((k) => ATTACHMENT_KIND_LABELS[k]);
 }
 
 // ---------------------------------------------------------------------------
@@ -157,23 +200,23 @@ type Transition =
   | "SUBMIT"
   | "START_REVIEW"
   | "ENDORSE"
+  | "ADVANCE_TO_SIGNATURE"
   | "RETURN"
   | "APPROVE"
   | "REJECT"
   | "CONFER";
 
+// §6: the recognition chain's legal transitions live in the shared workflow
+// registry — derived here so the engine is the only source of truth (§29).
 const TRANSITIONS: Record<
   Transition,
   { from: RecognitionStatus[]; to: RecognitionStatus; needNote?: boolean }
-> = {
-  SUBMIT: { from: ["DRAFT", "RETURNED"], to: "SUBMITTED" },
-  START_REVIEW: { from: ["SUBMITTED"], to: "UNDER_REVIEW" },
-  ENDORSE: { from: ["UNDER_REVIEW"], to: "FOR_APPROVAL" },
-  RETURN: { from: ["SUBMITTED", "UNDER_REVIEW", "FOR_APPROVAL"], to: "RETURNED", needNote: true },
-  APPROVE: { from: ["FOR_APPROVAL"], to: "APPROVED" },
-  REJECT: { from: ["SUBMITTED", "UNDER_REVIEW", "FOR_APPROVAL"], to: "REJECTED", needNote: true },
-  CONFER: { from: ["APPROVED"], to: "RECOGNIZED" },
-};
+> = Object.fromEntries(
+  RECOGNITION_WORKFLOW.transitions.map((t) => [
+    t.action,
+    { from: [...t.from] as RecognitionStatus[], to: t.to, needNote: t.needNote },
+  ])
+) as Record<Transition, { from: RecognitionStatus[]; to: RecognitionStatus; needNote?: boolean }>;
 
 function transitionAction(transition: Transition) {
   return async function action(_prev: ActionState, formData: FormData): Promise<ActionState> {
@@ -189,10 +232,13 @@ function transitionAction(transition: Transition) {
     const rec = await loadRecognition(id);
     if (!rec) return { error: "Application not found." };
 
+    const rule = RECOGNITION_WORKFLOW.transitions.find((t) => t.action === transition);
+    const permission = rule?.permission ?? "recognition.review";
+
     // ---- Authorization -----------------------------------------------------
     const officerTransition = transition === "SUBMIT";
     if (officerTransition) {
-      if (!can(user, "recognition.submit")) {
+      if (!can(user, permission)) {
         return { error: "You do not have permission to submit this application." };
       }
       try {
@@ -200,11 +246,23 @@ function transitionAction(transition: Transition) {
       } catch {
         return { error: "Only current officers of this organization can submit." };
       }
+      // §5: the SF-001 checklist must be complete before the application
+      // (initial or renewal) can leave the draft stage.
+      const gaps = await missingChecklistRequirements(
+        rec.id,
+        rec.organizationId,
+        rec.academicYear
+      );
+      if (gaps.length > 0) {
+        return {
+          error: `Complete the SF-001 checklist before submitting: ${gaps.join(", ")}. You can upload them from the organization's Documents page.`,
+        };
+      }
     } else if (transition === "CONFER") {
       if (user.role !== "OSAS") {
         return { error: "Only OSAS can confer official recognition." };
       }
-    } else if (transition === "APPROVE" || transition === "REJECT") {
+    } else if (permission === "recognition.approve") {
       if (!can(user, "recognition.approve")) {
         return { error: "You do not have permission to decide this application." };
       }
@@ -247,6 +305,7 @@ function transitionAction(transition: Transition) {
       SUBMIT: "APPLICATION_SUBMITTED",
       START_REVIEW: "REVIEW_STARTED",
       ENDORSE: "ENDORSED_FOR_APPROVAL",
+      ADVANCE_TO_SIGNATURE: "RECOGNITION_FOR_SIGNATURE",
       RETURN: "APPLICATION_RETURNED",
       APPROVE: "APPLICATION_APPROVED",
       REJECT: "APPLICATION_REJECTED",
@@ -266,6 +325,7 @@ function transitionAction(transition: Transition) {
     const outcomeMap: Partial<
       Record<Transition, { type: string; title: string }>
     > = {
+      ADVANCE_TO_SIGNATURE: { type: "APPLICATION_FOR_SIGNATURE", title: "Application forwarded for signature" },
       RETURN: { type: "APPLICATION_RETURNED", title: "Application returned for revision" },
       REJECT: { type: "APPLICATION_REJECTED", title: "Application disapproved" },
       APPROVE: { type: "APPLICATION_APPROVED", title: "Application approved" },
@@ -300,6 +360,7 @@ function transitionAction(transition: Transition) {
 export const submitRecognition = transitionAction("SUBMIT");
 export const startReview = transitionAction("START_REVIEW");
 export const endorseForApproval = transitionAction("ENDORSE");
+export const advanceToSignature = transitionAction("ADVANCE_TO_SIGNATURE");
 export const returnApplication = transitionAction("RETURN");
 export const approveApplication = transitionAction("APPROVE");
 export const rejectApplication = transitionAction("REJECT");

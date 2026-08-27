@@ -104,7 +104,7 @@ export default async function ActivityDetailPage({
       : false;
 
   const meta = PROPOSAL_STATUS_META[proposal.status];
-  const stepIndex = activityStepIndex(proposal.status);
+  const stepIndex = activityStepIndex(proposal.phase ?? "PLAN");
   const active = !user.isViewOnly;
 
   // ---- Available actions ---------------------------------------------------

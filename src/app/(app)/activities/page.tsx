@@ -19,12 +19,11 @@ type Search = { q?: string; status?: string };
 
 const STATUS_OPTIONS = [
   ["DRAFT", "Draft"],
-  ["SUBMITTED", "Pending"],
+  ["SUBMITTED", "Submitted"],
   ["ENDORSED", "Endorsed"],
   ["APPROVED", "Approved"],
   ["RETURNED", "Returned"],
   ["REJECTED", "Rejected"],
-  ["COMPLETED", "Completed"],
 ] as const;
 
 export default async function ActivitiesPage({

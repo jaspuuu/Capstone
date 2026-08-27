@@ -8,8 +8,11 @@ import { db } from "@/lib/db";
 import { can } from "@/lib/auth/rbac";
 import { requirePermissionOrThrow, requireUser } from "@/lib/auth/guards";
 import { writeAudit } from "@/lib/audit";
+import { notifyOrgOfficers } from "@/lib/notifications";
 import { currentAcademicYear } from "@/lib/utils";
 import { saveAttachmentFile, deleteAttachmentFile } from "@/lib/attachments";
+import { ORG_APPLICATION_WORKFLOW } from "@/lib/workflow";
+import type { OrgApplicationStatus, Role } from "@/generated/prisma/client";
 
 export type ActionState = { error?: string; success?: string };
 
@@ -62,11 +65,46 @@ async function readLogo(
   return { storedName: `${randomBytes(24).toString("hex")}${ext}`, bytes };
 }
 
+/**
+ * §5: who may edit an organization's profile. Admins (org.manage) always may;
+ * the President/Secretary may only edit their own application while it is
+ * still a DRAFT or was RETURNED for revision — never once under review.
+ */
+async function requireOrgProfileEditor(organizationId: string) {
+  const user = await requirePermissionOrThrow("org.view");
+  const org = await db.organization.findUnique({ where: { id: organizationId } });
+  if (!org) throw new Error("Organization not found.");
+  if (can(user, "org.manage")) return { user, org };
+  if (can(user, "org.submit")) {
+    if (!["DRAFT", "RETURNED"].includes(org.applicationStatus)) {
+      throw new Error(
+        "Details can only be edited while the application is a draft or was returned for revision."
+      );
+    }
+    const officer = await db.organizationMember.findFirst({
+      where: {
+        organizationId,
+        userId: user.id,
+        position: { in: ["PRESIDENT", "SECRETARY"] },
+        isCurrent: true,
+        status: "ACTIVE",
+      },
+    });
+    if (!officer) {
+      throw new Error("Only the organization's President or Secretary can edit this application.");
+    }
+    return { user, org };
+  }
+  throw new Error("You do not have permission to edit this organization.");
+}
+
 export async function createOrganization(
   _prev: ActionState,
   formData: FormData
 ): Promise<ActionState> {
-  const user = await requirePermissionOrThrow("org.manage");
+  // §5: the President creates the organization (org.submit); advisers/deans
+  // only review. Admins may still create on the President's behalf.
+  const user = await requirePermissionOrThrow("org.submit");
 
   const parsed = parseOrgForm(formData);
   if (!parsed.success) {
@@ -83,17 +121,21 @@ export async function createOrganization(
     return { error: "The logo must be a PNG, JPEG, or WebP image up to 2 MB." };
   }
 
-  // Â§28: founding officers and adviser are optional but, when given, must be
-  // real active accounts with the matching roles â€” no free-text names.
+  // §28: officers and adviser must be real active accounts — no free-text
+  // names. When an officer (President/Secretary) creates the org, they are
+  // themselves registered as the founding President.
   const ay = currentAcademicYear();
-  const presidentId = String(formData.get("presidentId") ?? "");
+  const isOfficerCreator = user.role === "PRESIDENT" || user.role === "SECRETARY";
+  const presidentId = isOfficerCreator
+    ? user.id
+    : String(formData.get("presidentId") ?? "");
   const secretaryId = String(formData.get("secretaryId") ?? "");
   const adviserId = String(formData.get("adviserId") ?? "");
 
-  const officerIds = [presidentId, secretaryId].filter(Boolean);
-  if (officerIds.length === 2 && presidentId === secretaryId) {
+  if (secretaryId && secretaryId === presidentId) {
     return { error: "The President and the Secretary must be different students." };
   }
+  const officerIds = [presidentId, secretaryId].filter(Boolean);
   const officers = officerIds.length
     ? await db.user.findMany({
         where: { id: { in: officerIds }, isActive: true, role: { in: ["MEMBER", "PRESIDENT", "SECRETARY"] } },
@@ -123,6 +165,9 @@ export async function createOrganization(
   }
 
   try {
+    // A new organization is always a DRAFT application — creating it never
+    // confers recognition (§5). Recognition comes when OSAS approves the
+    // application chain.
     const org = await db.organization.create({
       data: {
         name: data.name,
@@ -133,19 +178,20 @@ export async function createOrganization(
         collegeId: data.collegeId,
         departmentId: data.departmentId || null,
         foundedYear: data.foundedYear ?? null,
+        applicationStatus: "DRAFT",
         ...(logo ? { logoStoredName: logo.storedName } : {}),
       },
     });
     if (logo) await saveAttachmentFile(logo.storedName, logo.bytes);
 
-    // Seed the roster so the new organization can operate immediately.
+    // Seed the roster so the President can keep building the draft.
     for (const o of officers) {
       await db.organizationMember.create({
         data: {
           organizationId: org.id,
           userId: o.id,
           position: o.id === presidentId ? "PRESIDENT" : "SECRETARY",
-          status: "APPROVED",
+          status: "ACTIVE",
           academicYear: ay,
           decidedAt: new Date(),
           decidedById: user.id,
@@ -166,6 +212,7 @@ export async function createOrganization(
       entityLabel: org.name,
       newState: {
         ...data,
+        applicationStatus: "DRAFT",
         logo: Boolean(logo),
         officers: officerIds.length,
         adviser: adviser ? `${adviser.firstName} ${adviser.lastName}` : undefined,
@@ -184,17 +231,25 @@ export async function updateOrganization(
   _prev: ActionState,
   formData: FormData
 ): Promise<ActionState> {
-  const user = await requirePermissionOrThrow("org.manage");
   const id = String(formData.get("id") ?? "");
+
+  // §5: admins (org.manage) may edit any org; the President/Secretary may
+  // edit their own org only while it is a draft or returned for revision.
+  let user: Awaited<ReturnType<typeof requireOrgProfileEditor>>["user"];
+  let existing: Awaited<ReturnType<typeof requireOrgProfileEditor>>["org"];
+  try {
+    const ctx = await requireOrgProfileEditor(id);
+    user = ctx.user;
+    existing = ctx.org;
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Not authorized." };
+  }
 
   const parsed = parseOrgForm(formData);
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
   }
   const data = parsed.data;
-
-  const existing = await db.organization.findUnique({ where: { id } });
-  if (!existing) return { error: "Organization not found." };
 
   if (data.type === "CHILD" && !data.parentId) {
     return { error: "A sub-organization must have a mother organization." };
@@ -271,6 +326,261 @@ export async function setOrganizationStatus(formData: FormData): Promise<void> {
   revalidatePath(`/organizations/${id}`);
   revalidatePath("/organizations");
 }
+
+// ---------------------------------------------------------------------------
+// §5: Organization application workflow. The President creates the org
+// (DRAFT), submits it, and it passes adviser → dean → SOA → OSAS before OSAS
+// confers recognition. Reviewers never create organizations — they only
+// advance or return an application that an officer filed.
+//
+//   DRAFT ──SUBMIT──▶ SUBMITTED ──START_REVIEW──▶ UNDER_REVIEW
+//      ▲                   │             └─ADVISER_APPROVE──▶ FOR_SIGNATURE
+//      │              RETURN ──▶ RETURNED            └─DEAN_APPROVE──▶ FOR_APPROVAL
+//      │                   │                                 └─SOA_APPROVE──▶ APPROVED
+//   resubmit (SUBMIT)      └────────   └─CONFER(OSAS)──▶ RECOGNIZED
+//
+// RETURN may be used at any review step by the reviewer whose turn it is;
+// REJECT is an OSAS-only terminal decision.
+// ---------------------------------------------------------------------------
+
+type OrgAppTransition =
+  | "SUBMIT"
+  | "START_REVIEW"
+  | "ADVISER_APPROVE"
+  | "DEAN_APPROVE"
+  | "SOA_APPROVE"
+  | "CONFER"
+  | "RETURN"
+  | "REJECT";
+
+// §5/§6: the org application transition rules live in the shared workflow
+// registry (src/lib/workflow.ts) — the single source the actions AND the
+// process tracker read. This map is derived so it cannot drift.
+const ORG_APP_TRANSITIONS: Record<
+  OrgAppTransition,
+  { from: OrgApplicationStatus[]; to: OrgApplicationStatus; needNote?: boolean }
+> = Object.fromEntries(
+  ORG_APPLICATION_WORKFLOW.transitions.map((t) => [
+    t.action,
+    { from: [...t.from] as OrgApplicationStatus[], to: t.to as OrgApplicationStatus, needNote: t.needNote },
+  ])
+) as Record<OrgAppTransition, { from: OrgApplicationStatus[]; to: OrgApplicationStatus; needNote?: boolean }>;
+
+/** Who is expected to act next, given the application status (§32). */
+function orgAppReviewerRole(status: OrgApplicationStatus): Role | null {
+  return ORG_APPLICATION_WORKFLOW.gates[status]?.role ?? null;
+}
+
+/** The filing President or Secretary of this application may act on it. */
+async function requireOrgAppOfficer(organizationId: string) {
+  const user = await requirePermissionOrThrow("org.submit");
+  const officer = await db.organizationMember.findFirst({
+    where: {
+      organizationId,
+      userId: user.id,
+      position: { in: ["PRESIDENT", "SECRETARY"] },
+      isCurrent: true,
+      status: "ACTIVE",
+    },
+  });
+  if (!officer) {
+    throw new Error("Only the organization's President or Secretary can do that.");
+  }
+  return user;
+}
+
+/** The bound Senior Adviser (Regular Faculty) — the primary adviser. */
+async function requireBoundSeniorAdviser(organizationId: string) {
+  const user = await requirePermissionOrThrow("org.review");
+  if (user.role !== "ADVISER_REGULAR") {
+    throw new Error("Only the assigned Senior Adviser can review this application.");
+  }
+  const assignment = await db.adviserAssignment.findFirst({
+    where: { organizationId, adviserId: user.id, type: "REGULAR", isCurrent: true },
+  });
+  if (!assignment) {
+    throw new Error("You are not the assigned Senior Adviser of this organization.");
+  }
+  return user;
+}
+
+async function requireDeanInScope(organizationCollegeId: string) {
+  const user = await requirePermissionOrThrow("org.approve");
+  if (user.role !== "DEAN") {
+    throw new Error("Only the college Dean can act at this step.");
+  }
+  if (user.collegeId && user.collegeId !== organizationCollegeId) {
+    throw new Error("This application belongs to another college.");
+  }
+  return user;
+}
+
+async function requireRole(role: Role, permission: "org.approve" | "org.review") {
+  const user = await requirePermissionOrThrow(permission);
+  if (user.role !== role) {
+    throw new Error("You do not have authority at this step.");
+  }
+  return user;
+}
+
+function orgAppAction(transition: OrgAppTransition) {
+  return async function action(_prev: ActionState, formData: FormData): Promise<ActionState> {
+    const id = String(formData.get("id") ?? "");
+    const note = String(formData.get("note") ?? "").trim();
+    const spec = ORG_APP_TRANSITIONS[transition];
+
+    if (spec.needNote && !note) {
+      return { error: "A note explaining the decision is required." };
+    }
+
+    const org = await db.organization.findUnique({
+      where: { id },
+      include: { college: { select: { id: true } }, advisers: true },
+    });
+    if (!org) return { error: "Organization not found." };
+
+    // ---- Authorization -----------------------------------------------------
+    let user;
+    try {
+      switch (transition) {
+        case "SUBMIT": {
+          user = await requireOrgAppOfficer(id);
+          // An application needs its primary adviser before it can be filed.
+          const adviser = org.advisers.some((a) => a.type === "REGULAR" && a.isCurrent);
+          if (!adviser) {
+            return {
+              error: "Assign a Senior Adviser (Regular Faculty) before submitting the application.",
+            };
+          }
+          break;
+        }
+        case "START_REVIEW":
+        case "ADVISER_APPROVE":
+          user = await requireBoundSeniorAdviser(id);
+          break;
+        case "DEAN_APPROVE":
+          user = await requireDeanInScope(org.collegeId);
+          break;
+        case "SOA_APPROVE":
+          user = await requireRole("SOA", "org.approve");
+          break;
+        case "CONFER":
+          user = await requireRole("OSAS", "org.approve");
+          break;
+        case "REJECT":
+          user = await requireRole("OSAS", "org.approve");
+          break;
+        case "RETURN": {
+          const reviewer = orgAppReviewerRole(org.applicationStatus);
+          if (reviewer === "ADVISER_REGULAR") {
+            user = await requireBoundSeniorAdviser(id);
+          } else if (reviewer === "DEAN") {
+            user = await requireDeanInScope(org.collegeId);
+          } else if (reviewer === "SOA") {
+            user = await requireRole("SOA", "org.approve");
+          } else if (reviewer === "OSAS") {
+            user = await requireRole("OSAS", "org.approve");
+          } else {
+            return { error: "There is no reviewer at this step." };
+          }
+          break;
+        }
+      }
+    } catch (e) {
+      return { error: e instanceof Error ? e.message : "Not authorized." };
+    }
+
+    // ---- State machine -----------------------------------------------------
+    if (!spec.from.includes(org.applicationStatus)) {
+      return {
+        error: `Cannot do that while the application is "${org.applicationStatus
+          .replaceAll("_", " ")
+          .toLowerCase()}".`,
+      };
+    }
+
+    const now = new Date();
+    const data: {
+      applicationStatus: OrgApplicationStatus;
+      submittedAt?: Date;
+      decidedAt?: Date;
+      decidedById?: string;
+      applicationRemark?: string | null;
+    } = { applicationStatus: spec.to };
+    if (spec.to === "SUBMITTED") data.submittedAt = now;
+    if (["RECOGNIZED", "REJECTED"].includes(spec.to)) {
+      data.decidedAt = now;
+      data.decidedById = user!.id;
+    }
+    if (spec.to === "RETURNED" || spec.to === "REJECTED") {
+      data.applicationRemark = note;
+    }
+
+    await db.organization.update({ where: { id }, data });
+
+    // ---- Audit + notification ----------------------------------------------
+    const auditAction: Record<OrgAppTransition, string> = {
+      SUBMIT: "ORGANIZATION_SUBMITTED",
+      START_REVIEW: "ORGANIZATION_REVIEWED",
+      ADVISER_APPROVE: "ORGANIZATION_APPROVED",
+      DEAN_APPROVE: "ORGANIZATION_APPROVED",
+      SOA_APPROVE: "ORGANIZATION_APPROVED",
+      CONFER: "ORGANIZATION_RECOGNIZED",
+      RETURN: "ORGANIZATION_RETURNED",
+      REJECT: "ORGANIZATION_REJECTED",
+    };
+    await writeAudit({
+      userId: user!.id,
+      action: auditAction[transition],
+      entityType: "Organization",
+      entityId: id,
+      entityLabel: org.name,
+      previousState: { applicationStatus: org.applicationStatus },
+      newState: { applicationStatus: spec.to, note: note || undefined },
+    });
+
+    if (transition !== "SUBMIT") {
+      const outcomeMap: Partial<
+        Record<OrgAppTransition, { type: string; title: string }>
+      > = {
+        START_REVIEW: { type: "APPLICATION_UNDER_REVIEW", title: "Application review started" },
+        ADVISER_APPROVE: { type: "APPLICATION_FOR_SIGNATURE", title: "Application forwarded for signature" },
+        DEAN_APPROVE: { type: "APPLICATION_FOR_SIGNATURE", title: "Application forwarded for approval" },
+        SOA_APPROVE: { type: "APPLICATION_FOR_APPROVAL", title: "Application recommended" },
+        CONFER: { type: "RECOGNITION_CONFERRED", title: "Official recognition conferred" },
+        RETURN: { type: "APPLICATION_RETURNED", title: "Application returned for revision" },
+        REJECT: { type: "APPLICATION_REJECTED", title: "Application disapproved" },
+      };
+      const outcome = outcomeMap[transition];
+      if (outcome) {
+        try {
+          await notifyOrgOfficers(id, {
+            type: outcome.type,
+            title: `${outcome.title}: ${org.name}`,
+            body: [note ? `Note: ${note.slice(0, 160)}` : null].filter(Boolean).join(" · ") || "Review your organization's application.",
+            link: `/organizations/${id}`,
+          });
+        } catch {
+          // Best-effort.
+        }
+      }
+    }
+
+    revalidatePath(`/organizations/${id}`);
+    revalidatePath("/organizations");
+    revalidatePath("/dashboard");
+    return { success: "Action recorded." };
+  };
+}
+
+export const submitOrgApplication = orgAppAction("SUBMIT");
+export const startOrgReview = orgAppAction("START_REVIEW");
+export const adviserApproveApplication = orgAppAction("ADVISER_APPROVE");
+export const deanApproveApplication = orgAppAction("DEAN_APPROVE");
+export const soaApproveApplication = orgAppAction("SOA_APPROVE");
+export const conferOrgApplication = orgAppAction("CONFER");
+export const returnOrgApplication = orgAppAction("RETURN");
+export const rejectOrgApplication = orgAppAction("REJECT");
 
 // ---------------------------------------------------------------------------
 // Advisers (two distinct positions - never merged, Â§7)
@@ -437,7 +747,7 @@ async function requireOrgOfficerOrAdmin(organizationId: string) {
       userId: user.id,
       position: { in: ["PRESIDENT", "SECRETARY"] },
       isCurrent: true,
-      status: "APPROVED",
+      status: "ACTIVE",
     },
   });
   if (!officer) throw new Error("Only organization officers or administrators can do that.");
@@ -541,7 +851,7 @@ export async function addMembersBulk(_prev: ActionState, formData: FormData): Pr
                 organizationId,
                 userId: u.id,
                 position: "MEMBER",
-                status: "APPROVED",
+                status: "ACTIVE",
                 academicYear,
                 decidedAt: new Date(),
                 decidedById: user.id,
@@ -602,7 +912,7 @@ export async function applyForMembership(
     if (existing) {
       return {
         error:
-          existing.status === "PENDING"
+          existing.status === "APPLIED"
             ? "Your application is already awaiting review."
             : "You are already registered for this academic year.",
       };
@@ -613,7 +923,7 @@ export async function applyForMembership(
         organizationId,
         userId: user.id,
         position: "MEMBER",
-        status: "PENDING",
+        status: "APPLIED",
         academicYear: ay,
       },
     });
@@ -691,7 +1001,7 @@ export async function setMemberPosition(formData: FormData): Promise<void> {
   revalidatePath(`/organizations/${membership.organizationId}`);
 }
 
-/** Â§15: officer/admin approves or rejects a pending membership application. */
+/** §15: officer/admin approves or rejects a pending membership application. */
 export async function decideMembership(formData: FormData): Promise<void> {
   const membershipId = String(formData.get("membershipId") ?? "");
   const decision = String(formData.get("decision") ?? "");
@@ -701,27 +1011,78 @@ export async function decideMembership(formData: FormData): Promise<void> {
     where: { id: membershipId },
     include: { organization: true, user: true },
   });
-  if (!membership || membership.status !== "PENDING") return;
+  if (!membership || membership.status !== "APPLIED") return;
   const user = await requireOrgOfficerOrAdmin(membership.organizationId);
 
+  const nextStatus = decision === "APPROVED" ? "ACTIVE" : "REJECTED";
   await db.organizationMember.update({
     where: { id: membershipId },
     data: {
-      status: decision as "APPROVED" | "REJECTED",
+      status: nextStatus as "ACTIVE" | "REJECTED",
       decidedAt: new Date(),
       decidedById: user.id,
     },
   });
   await writeAudit({
     userId: user.id,
-    action: decision === "APPROVED" ? "MEMBERSHIP_APPROVED" : "MEMBERSHIP_REJECTED",
+    action: "MEMBERSHIP_REVIEWED",
     entityType: "Organization",
     entityId: membership.organizationId,
     entityLabel: membership.organization.name,
-    newState: {
-      member: `${membership.user.firstName} ${membership.user.lastName}`,
-      academicYear: membership.academicYear,
-    },
+    previousState: { status: "APPLIED", member: `${membership.user.firstName} ${membership.user.lastName}` },
+    newState: { status: nextStatus, member: `${membership.user.firstName} ${membership.user.lastName}`, academicYear: membership.academicYear },
+  });
+  revalidatePath(`/organizations/${membership.organizationId}`);
+}
+
+/** Officer moves an application from APPLIED to UNDER_REVIEW. */
+export async function reviewMembership(formData: FormData): Promise<void> {
+  const membershipId = String(formData.get("membershipId") ?? "");
+  const membership = await db.organizationMember.findUnique({
+    where: { id: membershipId },
+    include: { organization: true, user: true },
+  });
+  if (!membership || membership.status !== "APPLIED") return;
+  const user = await requireOrgOfficerOrAdmin(membership.organizationId);
+
+  await db.organizationMember.update({
+    where: { id: membershipId },
+    data: { status: "UNDER_REVIEW" },
+  });
+  await writeAudit({
+    userId: user.id,
+    action: "MEMBERSHIP_REVIEWED",
+    entityType: "Organization",
+    entityId: membership.organizationId,
+    entityLabel: membership.organization.name,
+    previousState: { status: "APPLIED", member: `${membership.user.firstName} ${membership.user.lastName}` },
+    newState: { status: "UNDER_REVIEW", academicYear: membership.academicYear },
+  });
+  revalidatePath(`/organizations/${membership.organizationId}`);
+}
+
+/** Officer/admin deactivates an ACTIVE membership (sets INACTIVE). */
+export async function deactivateMembership(formData: FormData): Promise<void> {
+  const membershipId = String(formData.get("membershipId") ?? "");
+  const membership = await db.organizationMember.findUnique({
+    where: { id: membershipId },
+    include: { organization: true, user: true },
+  });
+  if (!membership || membership.status !== "ACTIVE") return;
+  const user = await requireOrgOfficerOrAdmin(membership.organizationId);
+
+  await db.organizationMember.update({
+    where: { id: membershipId },
+    data: { status: "INACTIVE" },
+  });
+  await writeAudit({
+    userId: user.id,
+    action: "MEMBERSHIP_DEACTIVATED",
+    entityType: "Organization",
+    entityId: membership.organizationId,
+    entityLabel: membership.organization.name,
+    previousState: { status: "ACTIVE", member: `${membership.user.firstName} ${membership.user.lastName}` },
+    newState: { status: "INACTIVE", academicYear: membership.academicYear },
   });
   revalidatePath(`/organizations/${membership.organizationId}`);
 }
@@ -795,18 +1156,23 @@ export async function removeMember(formData: FormData): Promise<void> {
   if (!membership) return;
   const user = await requireOrgOfficerOrAdmin(membership.organizationId);
 
-  await db.organizationMember.delete({ where: { id: membershipId } });
+  await db.organizationMember.update({
+    where: { id: membershipId },
+    data: { status: "REMOVED" },
+  });
   await writeAudit({
     userId: user.id,
-    action: "MEMBER_REMOVED",
+    action: "MEMBERSHIP_REMOVED",
     entityType: "Organization",
     entityId: membership.organizationId,
     entityLabel: membership.organization.name,
     previousState: {
       member: `${membership.user.firstName} ${membership.user.lastName}`,
       position: membership.position,
+      status: membership.status,
       academicYear: membership.academicYear,
     },
+    newState: { status: "REMOVED" },
   });
   revalidatePath(`/organizations/${membership.organizationId}`);
 }

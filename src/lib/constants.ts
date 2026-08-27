@@ -47,8 +47,9 @@ type StatusMeta = { label: string; tone: BadgeTone };
 
 export const RECOGNITION_STATUS_META: Record<string, StatusMeta> = {
   DRAFT: { label: "Draft", tone: "neutral" },
-  SUBMITTED: { label: "Pending", tone: "warning" },
+  SUBMITTED: { label: "Submitted", tone: "warning" },
   UNDER_REVIEW: { label: "Under Review", tone: "info" },
+  FOR_SIGNATURE: { label: "For Signature", tone: "primary" },
   FOR_APPROVAL: { label: "For Approval", tone: "info" },
   APPROVED: { label: "Approved", tone: "success" },
   RECOGNIZED: { label: "Recognized", tone: "gold" },
@@ -64,6 +65,22 @@ export const ORG_STATE_META: Record<string, StatusMeta> = {
   INACTIVE: { label: "Inactive", tone: "neutral" },
   REJECTED: { label: "Rejected", tone: "danger" },
   ACTIVE: { label: "Active", tone: "success" },
+  DRAFT: { label: "Draft", tone: "neutral" },
+  FOR_REVIEW: { label: "For Review", tone: "warning" },
+  REVISION_REQUIRED: { label: "Revision Required", tone: "orange" },
+};
+
+/** §5: President-driven organization application lifecycle. */
+export const ORG_APPLICATION_STATUS_META: Record<string, StatusMeta> = {
+  DRAFT: { label: "Draft", tone: "neutral" },
+  SUBMITTED: { label: "Submitted", tone: "warning" },
+  UNDER_REVIEW: { label: "Under Review", tone: "info" },
+  FOR_SIGNATURE: { label: "For Signature", tone: "primary" },
+  FOR_APPROVAL: { label: "For Approval", tone: "info" },
+  APPROVED: { label: "Approved", tone: "success" },
+  RECOGNIZED: { label: "Recognized", tone: "gold" },
+  RETURNED: { label: "Revision Required", tone: "orange" },
+  REJECTED: { label: "Rejected", tone: "danger" },
 };
 
 /** §17: distinct interview stage within the recognition review. */
@@ -87,12 +104,31 @@ export const REQUIREMENT_STATUS_META: Record<string, StatusMeta> = {
 
 export const PROPOSAL_STATUS_META: Record<string, StatusMeta> = {
   DRAFT: { label: "Draft", tone: "neutral" },
-  SUBMITTED: { label: "Pending", tone: "warning" },
+  SUBMITTED: { label: "Submitted", tone: "warning" },
   ENDORSED: { label: "Endorsed", tone: "info" },
   APPROVED: { label: "Approved", tone: "success" },
   RETURNED: { label: "Returned", tone: "orange" },
   REJECTED: { label: "Rejected", tone: "danger" },
-  COMPLETED: { label: "Completed", tone: "gold" },
+};
+
+export const ACTIVITY_PHASE_META: Record<string, StatusMeta> = {
+  PLAN: { label: "Planning", tone: "neutral" },
+  PROPOSAL: { label: "Proposal", tone: "warning" },
+  APPROVAL: { label: "Approval", tone: "info" },
+  IMPLEMENTATION: { label: "Implementation", tone: "primary" },
+  MONITORING: { label: "Monitoring", tone: "info" },
+  ACCOMPLISHMENT: { label: "Accomplishment", tone: "success" },
+  ARCHIVE: { label: "Archive", tone: "neutral" },
+};
+
+export const MEMBERSHIP_STATUS_META: Record<string, StatusMeta> = {
+  APPLIED: { label: "Applied", tone: "warning" },
+  UNDER_REVIEW: { label: "Under Review", tone: "info" },
+  APPROVED: { label: "Approved", tone: "success" },
+  ACTIVE: { label: "Active", tone: "success" },
+  INACTIVE: { label: "Inactive", tone: "neutral" },
+  REJECTED: { label: "Rejected", tone: "danger" },
+  REMOVED: { label: "Removed", tone: "danger" },
 };
 
 export const REPORT_STATUS_META: Record<string, StatusMeta> = {
@@ -147,12 +183,22 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   DEPARTMENT_CREATED: "Created department",
   ORGANIZATION_CREATED: "Created organization",
   ORGANIZATION_UPDATED: "Updated organization",
+  ORGANIZATION_SUBMITTED: "Submitted organization application",
+  ORGANIZATION_REVIEWED: "Reviewed organization application",
+  ORGANIZATION_RETURNED: "Returned organization application",
+  ORGANIZATION_APPROVED: "Approved organization application",
+  ORGANIZATION_REJECTED: "Rejected organization application",
+  ORGANIZATION_RECOGNIZED: "Conferred recognition on organization",
   ORGANIZATION_ARCHIVED: "Archived organization",
   ORGANIZATION_RESTORED: "Restored organization",
   ADVISER_ASSIGNED: "Assigned adviser",
   ADVISER_REMOVED: "Removed adviser assignment",
   MEMBER_ADDED: "Added member",
   MEMBER_REMOVED: "Removed member",
+  MEMBERSHIP_APPLIED: "Applied for membership",
+  MEMBERSHIP_REVIEWED: "Reviewed membership application",
+  MEMBERSHIP_REMOVED: "Soft-removed member",
+  MEMBERSHIP_DEACTIVATED: "Deactivated membership",
   APPLICATION_CREATED: "Created application",
   APPLICATION_SUBMITTED: "Submitted application",
   REVIEW_STARTED: "Started review",
@@ -161,6 +207,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   APPLICATION_APPROVED: "Approved application",
   APPLICATION_REJECTED: "Rejected application",
   RECOGNITION_CONFERRED: "Conferred recognition",
+  RECOGNITION_FOR_SIGNATURE: "Forwarded for signature",
   RENEWAL_STARTED: "Started renewal",
   DEADLINE_CREATED: "Created deadline",
   DEADLINE_UPDATED: "Updated deadline",

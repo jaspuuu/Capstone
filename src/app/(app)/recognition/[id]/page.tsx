@@ -19,6 +19,7 @@ import { ActionForm } from "@/components/action-form";
 import { AttachmentsCard } from "@/components/attachments-card";
 import { canManageAttachments } from "@/lib/attachment-access";
 import {
+  advanceToSignature,
   approveApplication,
   conferRecognition,
   endorseForApproval,
@@ -163,12 +164,12 @@ export default async function RecognitionDetailPage({
     if (!(deanScoped && rec.organization.collegeId !== user.collegeId) && rec.status === "FOR_APPROVAL") {
       panels.push(
         {
-          key: "approve",
-          title: "Approve application",
-          description: "Approve the organization for recognition in AY " + rec.academicYear + ".",
+          key: "advance-signature",
+          title: "Forward for signature",
+          description: "Move to the signature stage before final approval.",
           variant: "primary",
-          submitLabel: "Approve",
-          action: approveApplication,
+          submitLabel: "Forward for signature",
+          action: advanceToSignature,
         },
         {
           key: "reject",
@@ -188,6 +189,28 @@ export default async function RecognitionDetailPage({
           variant: "outline",
           submitLabel: "Return with note",
           action: returnApplication,
+        }
+      );
+    }
+    if (!(deanScoped && rec.organization.collegeId !== user.collegeId) && rec.status === "FOR_SIGNATURE") {
+      panels.push(
+        {
+          key: "approve",
+          title: "Approve application",
+          description: "Approve the organization for recognition in AY " + rec.academicYear + ".",
+          variant: "primary",
+          submitLabel: "Approve",
+          action: approveApplication,
+        },
+        {
+          key: "reject",
+          title: "Reject application",
+          description: "Rejects permanently — history is retained.",
+          needNote: true,
+          noteLabel: "Reason for rejection",
+          variant: "danger",
+          submitLabel: "Reject",
+          action: rejectApplication,
         }
       );
     }
@@ -339,7 +362,7 @@ export default async function RecognitionDetailPage({
                   <ActionForm
                     action={scheduleInterview}
                     submitLabel="Schedule interview"
-                    variant="primary"
+                    variant="outline"
                     footerClassName="mt-3"
                     className="space-y-3"
                   >
@@ -465,9 +488,13 @@ export default async function RecognitionDetailPage({
         </div>
       )}
       {rec.status === "RETURNED" && (
-        <div className="mt-6 flex items-start gap-2 rounded-lg border border-orange-200 bg-orange-50 px-3.5 py-3 text-sm text-orange-700">
-          <Undo2 className="mt-0.5 size-4 shrink-0" aria-hidden />
-          <span>This application was returned to the organization officers for revision.</span>
+        <div className="mt-6">
+          <Alert tone="warning" title="Returned for revision">
+            <span className="inline-flex items-center gap-1.5">
+              <Undo2 className="size-4" aria-hidden />
+              This application was returned to the organization officers for revision.
+            </span>
+          </Alert>
         </div>
       )}
     </>

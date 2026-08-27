@@ -1,4 +1,5 @@
 import "server-only";
+import { ACTIVITY_PHASES, ACTIVITY_WORKFLOW } from "@/lib/workflow";
 
 /**
  * Part 8 - Plan of activities monitoring & evaluation (proposal objective
@@ -6,13 +7,21 @@ import "server-only";
  *
  * Pure computation over existing activity-proposal data: pipeline counts,
  * evaluation flags (ended-but-unreported, budget variance, attendance
- * capture), and upcoming schedule. No ML, no thresholds beyond fixed rules.
+ * capture), and upcoming schedule. Buckets are derived from the shared
+ * workflow defs so they can never drift from enforcement.
  */
+
+/** Anything past the draft stage (SUBMITTED / ENDORSED / APPROVED). */
+const ACTIVE_STATUSES: string[] = ACTIVITY_WORKFLOW.steps.slice(1).map((s) => s.status);
+const REJECTED = ACTIVITY_WORKFLOW.rejectTo;
+/** Completion phases: the final two activity phases (ACCOMPLISHMENT/ARCHIVE). */
+const COMPLETE_PHASES: string[] = ACTIVITY_PHASES.slice(-2).map((s) => s.status);
 
 export type MonitoredActivity = {
   id: string;
   title: string;
   status: string;
+  phase: string | null;
   scope: string;
   venue: string | null;
   startAt: Date;
@@ -59,15 +68,15 @@ export function monitorOrg(
   return {
     ...o,
     activities: [...rows].sort((a, b) => a.startAt.getTime() - b.startAt.getTime()),
-    planned: rows.filter((a) => !["REJECTED"].includes(a.status)).length,
-    approved: rows.filter((a) => ["APPROVED", "COMPLETED"].includes(a.status)).length,
-    completed: rows.filter((a) => a.status === "COMPLETED").length,
+    planned: rows.filter((a) => a.status !== REJECTED).length,
+    approved: rows.filter((a) => a.status === "APPROVED").length,
+    completed: rows.filter((a) => COMPLETE_PHASES.includes(a.phase ?? "")).length,
     returned: rows.filter((a) => a.status === "RETURNED").length,
     endedWithoutReport: rows.filter((a) => ended(a) && !hasReport(a)),
     upcoming: rows.filter(
       (a) =>
         a.startAt.getTime() >= now.getTime() &&
-        ["SUBMITTED", "ENDORSED", "APPROVED"].includes(a.status)
+        ACTIVE_STATUSES.includes(a.status)
     ),
     budgetPlanned:
       Math.round(

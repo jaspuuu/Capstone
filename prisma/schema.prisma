@@ -142,18 +142,40 @@ enum OrgStatus {
   INACTIVE
 }
 
+// Creation/review lifecycle for a new organization application. The
+// President creates the org as DRAFT, submits it for review, and it passes
+// through adviser → dean → SOA → OSAS before OSAS confers recognition
+// (RECOGNIZED). RECOGNIZED is the terminal application state and maps to the
+// visible "Recognized / Active" state.
+enum OrgApplicationStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  FOR_SIGNATURE
+  FOR_APPROVAL
+  APPROVED
+  RECOGNIZED
+  RETURNED
+  REJECTED
+}
+
 enum MemberPosition {
   PRESIDENT
   SECRETARY
   MEMBER
 }
 
-// Membership approval lifecycle: students apply, the organization decides.
-// Existing/seeded rows default to APPROVED so history stays valid.
+// Membership lifecycle: students apply, officers review, approved members
+// participate. Statuses track the full lifecycle; REMOVED is a soft-delete
+// that preserves history (§24).
 enum MembershipStatus {
-  PENDING
+  APPLIED
+  UNDER_REVIEW
   APPROVED
+  ACTIVE
+  INACTIVE
   REJECTED
+  REMOVED
 }
 
 enum AdviserType {
@@ -175,6 +197,13 @@ model Organization {
   departmentId   String?
   department     Department?    @relation(fields: [departmentId], references: [id])
   status         OrgStatus      @default(ACTIVE)
+  // President-driven application lifecycle: DRAFT → SUBMITTED → review chain.
+  applicationStatus OrgApplicationStatus @default(DRAFT)
+  submittedAt    DateTime?
+  // Reviewer note on returned/rejected applications.
+  applicationRemark String?
+  decidedAt      DateTime?
+  decidedById    String?
   foundedYear    Int?
   // Organization-uploaded identity asset (file in storage/uploads).
   logoStoredName String?
@@ -191,6 +220,7 @@ model Organization {
   @@index([collegeId])
   @@index([type])
   @@index([status])
+  @@index([applicationStatus])
 }
 
 model OrganizationMember {
@@ -200,7 +230,7 @@ model OrganizationMember {
   userId         String
   user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   position       MemberPosition   @default(MEMBER)
-  status         MembershipStatus @default(APPROVED)
+  status         MembershipStatus @default(ACTIVE)
   academicYear   String
   isCurrent      Boolean          @default(true)
   joinedAt       DateTime         @default(now())
@@ -255,6 +285,7 @@ enum RecognitionStatus {
   DRAFT
   SUBMITTED
   UNDER_REVIEW
+  FOR_SIGNATURE
   FOR_APPROVAL
   APPROVED
   RECOGNIZED
@@ -323,7 +354,18 @@ enum ProposalStatus {
   APPROVED
   RETURNED
   REJECTED
-  COMPLETED
+}
+
+// Activity lifecycle phase: tracks where an activity is in its overall
+// lifecycle, independent of the proposal approval status.
+enum ActivityPhase {
+  PLAN
+  PROPOSAL
+  APPROVAL
+  IMPLEMENTATION
+  MONITORING
+  ACCOMPLISHMENT
+  ARCHIVE
 }
 
 model ActivityProposal {
@@ -341,6 +383,7 @@ model ActivityProposal {
   estimatedBudget      Float?
   expectedParticipants Int?
   status               ProposalStatus @default(DRAFT)
+  phase                ActivityPhase  @default(PLAN)
   submittedAt          DateTime?
   decidedAt            DateTime?
   decidedById          String?

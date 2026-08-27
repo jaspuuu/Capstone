@@ -34,7 +34,7 @@ function ProgressCell({
     <div className="flex items-center gap-2" title={`${done} of ${items.length} SF-001 requirements submitted`}>
       <div className="h-1.5 w-20 overflow-hidden rounded-full bg-surface-secondary">
         <div
-          className={`h-full rounded-full ${pct === 100 ? "bg-green-600" : pct >= 50 ? "bg-gold" : "bg-danger"}`}
+          className={`h-full rounded-full ${pct === 100 ? "bg-success" : pct >= 50 ? "bg-gold" : "bg-danger"}`}
           style={{ width: `${pct}%` }}
         />
       </div>

@@ -12,7 +12,8 @@ import { OrganizationForm } from "../organization-form";
 export const metadata: Metadata = { title: "New organization" };
 
 export default async function NewOrganizationPage() {
-  await requirePermission("org.manage");
+  const user = await requirePermission("org.submit");
+  const isOfficerCreator = user.role === "PRESIDENT" || user.role === "SECRETARY";
 
   const [colleges, departments, orgs, students, advisers] = await Promise.all([
     db.college.findMany({ orderBy: { name: "asc" } }),
@@ -39,7 +40,11 @@ export default async function NewOrganizationPage() {
     <div className="mx-auto max-w-3xl">
       <PageHeader
         title="New organization"
-        description="Register a student organization. Recognition is granted separately through the recognition lifecycle."
+        description={
+          isOfficerCreator
+            ? "Create your organization's application. You will be registered as its founding President; you can complete it later — recognition is only granted after the full review chain."
+            : "Register a student organization application. The President completes and files it; recognition is granted only after the full review chain."
+        }
         breadcrumb={[
           { label: "Organizations", href: "/organizations" },
           { label: "New" },
@@ -56,7 +61,7 @@ export default async function NewOrganizationPage() {
       />
 
       <Card>
-        <CardHeader title="Organization profile" description="Basic information about the organization." />
+        <CardHeader title="Organization application" description="Basic information about the organization." />
         <CardContent>
           <OrganizationForm
             action={createOrganization}
@@ -67,7 +72,12 @@ export default async function NewOrganizationPage() {
             organizations={orgs.map((o) => ({ id: o.id, label: o.acronym ?? o.name }))}
             students={students.map((s) => ({ id: s.id, label: `${s.firstName} ${s.lastName}` }))}
             advisers={advisers.map((a) => ({ id: a.id, label: `${a.firstName} ${a.lastName}` }))}
-            submitLabel="Create organization"
+            founder={
+              isOfficerCreator
+                ? { id: user.id, label: `${user.firstName} ${user.lastName} (you)` }
+                : undefined
+            }
+            submitLabel="Create draft application"
           />
         </CardContent>
       </Card>

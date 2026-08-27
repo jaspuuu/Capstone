@@ -16,7 +16,6 @@ export default async function NewDeadlinePage() {
   const colleges = await db.college.findMany({ orderBy: { name: "asc" } });
   const ay = currentAcademicYear();
 
-  // Sensible defaults: a one-month window starting today.
   const start = new Date();
   const due = new Date(start.getTime() + 30 * 86_400_000);
 

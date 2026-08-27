@@ -12,10 +12,6 @@ export const metadata: Metadata = { title: "Activity Calendar" };
 
 type Search = { view?: string; date?: string; org?: string; q?: string };
 
-// ---------------------------------------------------------------------------
-// Date helpers (local time)
-// ---------------------------------------------------------------------------
-
 function parseAnchor(s?: string): Date {
   if (s && /^\d{4}-\d{2}-\d{2}$/.test(s)) {
     const d = new Date(`${s}T00:00:00`);

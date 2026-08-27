@@ -140,7 +140,7 @@ export function MemberPicker({
       {(state.error || state.success) && (
         <p
           className={`rounded-lg px-3 py-2 text-sm ${
-            state.error ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700"
+            state.error ? "bg-danger-light text-danger" : "bg-success-light text-success"
           }`}
           role="alert"
         >

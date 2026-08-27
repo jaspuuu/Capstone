@@ -10,6 +10,7 @@ import { can, isAdminRole } from "@/lib/auth/rbac";
 import { writeAudit } from "@/lib/audit";
 import { notifyOrgOfficers } from "@/lib/notifications";
 import { currentAcademicYear } from "@/lib/utils";
+import { ACTIVITY_WORKFLOW } from "@/lib/workflow";
 
 export type ActionState = { error?: string; success?: string };
 
@@ -224,16 +225,20 @@ export async function updateActivity(_prev: ActionState, formData: FormData): Pr
 // Lifecycle transitions
 // ---------------------------------------------------------------------------
 
+// §6/§20: the proposal chain's legal transitions + phase side-effects live in
+// the shared workflow registry — derived here so there is one source of truth.
 const TRANSITIONS: Record<
   "SUBMIT" | "ENDORSE" | "RETURN" | "APPROVE" | "REJECT",
-  { from: ProposalStatus[]; to: ProposalStatus; needNote?: boolean }
-> = {
-  SUBMIT: { from: ["DRAFT", "RETURNED"], to: "SUBMITTED" },
-  ENDORSE: { from: ["SUBMITTED"], to: "ENDORSED" },
-  RETURN: { from: ["SUBMITTED", "ENDORSED"], to: "RETURNED", needNote: true },
-  APPROVE: { from: ["ENDORSED"], to: "APPROVED" },
-  REJECT: { from: ["SUBMITTED", "ENDORSED"], to: "REJECTED", needNote: true },
-};
+  { from: ProposalStatus[]; to: ProposalStatus; needNote?: boolean; nextPhase?: string }
+> = Object.fromEntries(
+  ACTIVITY_WORKFLOW.transitions.map((t) => [
+    t.action,
+    { from: [...t.from] as ProposalStatus[], to: t.to, needNote: t.needNote, nextPhase: t.nextPhase },
+  ])
+) as Record<
+  "SUBMIT" | "ENDORSE" | "RETURN" | "APPROVE" | "REJECT",
+  { from: ProposalStatus[]; to: ProposalStatus; needNote?: boolean; nextPhase?: string }
+>;
 
 function transitionAction(transition: keyof typeof TRANSITIONS) {
   return async function action(_prev: ActionState, formData: FormData): Promise<ActionState> {
@@ -294,6 +299,7 @@ function transitionAction(transition: keyof typeof TRANSITIONS) {
       where: { id },
       data: {
         status: spec.to,
+        ...(spec.nextPhase ? { phase: spec.nextPhase as "PLAN" | "PROPOSAL" | "APPROVAL" | "IMPLEMENTATION" | "MONITORING" | "ACCOMPLISHMENT" | "ARCHIVE" } : {}),
         submittedAt: transition === "SUBMIT" ? new Date() : proposal.submittedAt,
         decidedAt: ["APPROVED", "REJECTED"].includes(spec.to) ? new Date() : proposal.decidedAt,
         decidedById: ["APPROVED", "REJECTED"].includes(spec.to) ? user.id : proposal.decidedById,

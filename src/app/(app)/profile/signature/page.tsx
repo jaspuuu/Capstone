@@ -52,7 +52,7 @@ export default async function SignaturePage() {
                     className="max-h-[64px] rounded border border-line bg-white px-2 py-1"
                   />
                 ) : (
-                  <span className="text-[26px] leading-none text-gray-900" style={{ fontFamily: '"Great Vibes", cursive' }}>
+                  <span className="text-[26px] leading-none text-content" style={{ fontFamily: '"Great Vibes", cursive' }}>
                     {user!.signatureTyped}
                   </span>
                 )}

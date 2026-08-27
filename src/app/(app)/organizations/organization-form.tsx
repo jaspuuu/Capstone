@@ -16,6 +16,7 @@ export function OrganizationForm({
   initial,
   students,
   advisers,
+  founder,
   academicYear,
   mode = "edit",
   submitLabel,
@@ -38,6 +39,8 @@ export function OrganizationForm({
   /** §28: optional validated founding officers/adviser (create mode only). */
   students?: Option[];
   advisers?: Option[];
+  /** §5: when an officer creates the org, they ARE the founding President. */
+  founder?: { id: string; label: string };
   academicYear?: string;
   mode?: "create" | "edit";
   submitLabel: string;
@@ -174,21 +177,31 @@ export function OrganizationForm({
           <div>
             <p className="text-sm font-bold text-content">Founding officers & adviser</p>
             <p className="mt-0.5 text-xs text-content-secondary">
-              Optional — pick from validated accounts. The President and Secretary are registered as the first
-              officers for AY {academicYear ?? "the current academic year"}; the adviser must be a Senior Adviser (Regular Faculty).
+              The President is registered as the first officer for AY{" "}
+              {academicYear ?? "the current academic year"}; the adviser must be a Senior Adviser
+              (Regular Faculty). You can adjust the rest later.
             </p>
           </div>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-            <Field label="President" htmlFor="presidentId">
-              <Select id="presidentId" name="presidentId" defaultValue="">
-                <option value="">None yet</option>
-                {(students ?? []).map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.label}
-                  </option>
-                ))}
-              </Select>
-            </Field>
+            {founder ? (
+              <Field label="President" hint="Registered as the founding President">
+                <input type="hidden" name="presidentId" value={founder.id} />
+                <div className="flex h-10 items-center rounded-lg border border-line-strong bg-surface-secondary px-3 text-sm font-semibold text-content">
+                  {founder.label}
+                </div>
+              </Field>
+            ) : (
+              <Field label="President" htmlFor="presidentId">
+                <Select id="presidentId" name="presidentId" defaultValue="">
+                  <option value="">None yet</option>
+                  {(students ?? []).map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.label}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            )}
             <Field label="Secretary" htmlFor="secretaryId">
               <Select id="secretaryId" name="secretaryId" defaultValue="">
                 <option value="">None yet</option>
