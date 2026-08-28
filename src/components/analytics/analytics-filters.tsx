@@ -7,9 +7,8 @@ const selectCls =
   "h-9 rounded-lg border border-line-strong bg-surface px-2.5 text-xs font-medium text-content focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/15";
 
 export type FilterOptions = {
-  years: string[];
-  yearsLabel: (ay: string) => string;
-  /** Year preselected when no ay filter is present (must exist in `years`). */
+  years: { value: string; label: string }[];
+  /** Year preselected when no ay filter is present (value must exist in `years`). */
   defaultAY: string;
   orgs: { id: string; label: string }[];
   colleges: string[];
@@ -47,8 +46,8 @@ export function AnalyticsFilters({ options }: { options: FilterOptions }) {
               onChange={(e) => pick("ay", e.target.value)}
             >
               {options.years.map((y) => (
-                <option key={y} value={y}>
-                  {options.yearsLabel(y)}
+                <option key={y.value} value={y.value}>
+                  {y.label}
                 </option>
               ))}
             </select>

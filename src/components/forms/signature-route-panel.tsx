@@ -6,6 +6,8 @@ import {
   CircleDashed,
   Lock,
   RotateCcw,
+  ShieldCheck,
+  ShieldX,
   Undo2,
   XCircle,
 } from "lucide-react";
@@ -17,6 +19,7 @@ import {
   signCurrentStep,
   type RouteActionState,
 } from "@/lib/actions/signature-route";
+import type { SignatureChainVerification } from "@/lib/signature-integrity";
 
 // ---------------------------------------------------------------------------
 // Document workflow tracker (§7, §27). Shows exactly where a document is:
@@ -58,13 +61,15 @@ function fmt(d: Date) {
 
 export function SignatureRoutePanel({
   route,
-  viewerId,
   viewerCanSignNow,
+  verification,
 }: {
   route: RouteView;
   viewerId: string;
   /** Server already verified the viewer is the awaited signatory. */
   viewerCanSignNow: boolean;
+  /** Recomputed hash-chain result for the route's signed steps (server-side). */
+  verification?: SignatureChainVerification;
 }) {
   const [signState, signAction] = useActionState(signCurrentStep, EMPTY);
   const [returnState, returnAction] = useActionState(returnCurrentStep, EMPTY);
@@ -131,6 +136,43 @@ export function SignatureRoutePanel({
           );
         })}
       </ol>
+
+      {/* Signature-chain integrity */}
+      {verification && verification.total > 0 && (
+        <div
+          className={`mt-4 rounded-lg border px-3 py-2.5 ${
+            verification.ok ? "border-emerald-200 bg-emerald-50" : "border-red-200 bg-red-50"
+          }`}
+          role={verification.ok ? undefined : "alert"}
+        >
+          <div className="flex items-center gap-2">
+            {verification.ok ? (
+              <ShieldCheck className="size-4 text-emerald-600" aria-hidden />
+            ) : (
+              <ShieldX className="size-4 text-red-600" aria-hidden />
+            )}
+            <p className={`text-xs font-bold ${verification.ok ? "text-emerald-800" : "text-red-800"}`}>
+              {verification.ok
+                ? `Signature chain verified (${verification.verified}/${verification.total} links)`
+                : "Signature chain integrity check failed"}
+            </p>
+          </div>
+          {!verification.ok && (
+            <ul className="mt-1.5 space-y-0.5">
+              {verification.links
+                .filter((l) => !l.ok)
+                .map((l) => (
+                  <li key={l.order} className="text-xs text-red-700">
+                    Step {l.order} ({SIGNATORY_LABELS[l.role as SignatoryRole] ?? l.role}): {l.reason}
+                  </li>
+                ))}
+            </ul>
+          )}
+          <p className="mt-1 text-[11px] leading-snug text-content-secondary">
+            Each signature is bound to the previous one with a SHA-256 chain at the moment of signing.
+          </p>
+        </div>
+      )}
 
       {(signState.error || signState.ok || returnState.error || resubmitState.error || resubmitState.ok) && (
         <p

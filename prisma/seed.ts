@@ -527,6 +527,35 @@ async function main() {
     console.log("Activities/reports already present — skipping seed.");
   }
 
+  // ------------------------------------------------------- M&E evaluation
+  const evaluationCount = await prisma.activityEvaluation.count();
+  if (evaluationCount === 0) {
+    const completedActivity = await prisma.activityProposal.findFirst({
+      where: {
+        organizationId: ccsSbo.id,
+        academicYear: AY_CUR,
+        report: { isNot: null },
+      },
+      select: { id: true, title: true },
+    });
+    if (completedActivity && osas) {
+      await prisma.activityEvaluation.upsert({
+        where: { activityId: completedActivity.id },
+        update: {},
+        create: {
+          activityId: completedActivity.id,
+          evaluatorId: osas.id,
+          relevance: 5,
+          impact: 4,
+          efficiency: 4,
+          sustainability: 4,
+          remarks: "Well-attended; recommend a bigger venue next cycle and earlier archiving of outputs.",
+        },
+      });
+      console.log(`M&E evaluation recorded for “${completedActivity.title}”.`);
+    }
+  }
+
   // ------------------------------------------------------- Attachments
   const attachmentCount = await prisma.attachment.count();
   if (attachmentCount === 0) {

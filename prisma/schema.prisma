@@ -69,6 +69,7 @@ model User {
   notifications          Notification[]         @relation("NotificationRecipient")
   attendanceRecords      ActivityAttendance[]   @relation("ActivityAttendanceUser")
   recordedAttendance     ActivityAttendance[]   @relation("ActivityAttendanceRecorder")
+  decisionsEvaluations   ActivityEvaluation[]   @relation("ActivityEvaluationEvaluator")
   createdCheckIns        ActivityCheckIn[]      @relation("CheckInCreator")
   decidedMemberships     OrganizationMember[]   @relation("MembershipDecidedBy")
   endedAdviserTerms      AdviserAssignment[]    @relation("AdviserAssignmentEnder")
@@ -395,6 +396,7 @@ model ActivityProposal {
   report            AccomplishmentReport?
   attendanceRecords ActivityAttendance[]
   checkIn           ActivityCheckIn?
+  evaluation        ActivityEvaluation?
 
   @@index([organizationId])
   @@index([status])
@@ -447,6 +449,30 @@ model ActivityCheckIn {
   createdById String
   createdBy   User             @relation("CheckInCreator", fields: [createdById], references: [id])
   createdAt   DateTime         @default(now())
+}
+
+// ---------------------------------------------------------------------------
+// Monitoring & evaluation (M&E). One explicit, rubric-based evaluation per
+// activity, entered by an analytics/OSAS officer after the activity ends.
+// Every dimension is a 1-5 score; no rating is ever invented by the system.
+// ---------------------------------------------------------------------------
+
+model ActivityEvaluation {
+  id             String           @id @default(cuid())
+  activityId     String           @unique
+  activity       ActivityProposal @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  evaluatorId    String
+  evaluator      User             @relation("ActivityEvaluationEvaluator", fields: [evaluatorId], references: [id])
+  // 1-5 rubric scores (validated in the server action).
+  relevance      Int
+  impact         Int
+  efficiency     Int
+  sustainability Int
+  remarks        String?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@index([activityId])
 }
 
 enum ReportStatus {
@@ -555,6 +581,12 @@ model SignatureStep {
   comment         String?
   actedById       String?
   actedBy         User?               @relation("SignatureStepActor", fields: [actedById], references: [id])
+  // Tamper-evident attachment §: at sign time the signer, role, method,
+  // timestamp and a canonical content hash of the routed document are chained
+  // so any later change to an earlier link breaks verification.
+  contentHash     String?
+  prevChainHash   String?
+  chainHash       String?
 
   @@unique([routeId, order])
   @@index([routeId, status])

@@ -882,3 +882,206 @@ export function prioritySummary(alerts: AnalyticsAlert[]): Record<AlertPriority,
     INFO: alerts.filter((a) => a.priority === "INFO").length,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Budget utilization (planned vs actual variance)
+// ---------------------------------------------------------------------------
+
+/** How much of the approved budget has been spent, or null when unmeasurable. */
+export function budgetUtilizationPct(planned: number, actual: number): number | null {
+  if (planned <= 0) return null;
+  return Math.round((actual / planned) * 100);
+}
+
+export const BUDGET_OVERRUN_THRESHOLD = 1.05;
+
+/**
+ * Rule-based budget alerts: an activity portfolio is flagged High when actual
+ * spending is more than 5% above budget, Informational when spending exists
+ * with no approved budget on record.
+ */
+export function budgetAlerts(
+  orgs: { id: string; acronym: string | null; name: string; budgetPlanned: number; budgetActual: number }[]
+): AnalyticsAlert[] {
+  const out: AnalyticsAlert[] = [];
+  for (const o of orgs) {
+    if (o.budgetActual <= 0) continue;
+    if (o.budgetPlanned > 0 && o.budgetActual > o.budgetPlanned * BUDGET_OVERRUN_THRESHOLD) {
+      out.push({
+        id: `budget-${o.id}`,
+        priority: "HIGH",
+        kind: "BUDGET_OVERRUN",
+        title: `${o.acronym ?? o.name} — budget overrun`,
+        detail: `Spent ${formatPHP(o.budgetActual)} against an approved ${formatPHP(o.budgetPlanned)} (${budgetUtilizationPct(o.budgetPlanned, o.budgetActual)}% utilization).`,
+        why: `Rule: actual spending exceeding ${Math.round((BUDGET_OVERRUN_THRESHOLD - 1) * 100)}% over the approved budget is flagged for review.`,
+        orgId: o.id,
+        href: `/analytics/org/${o.id}`,
+      });
+    } else if (o.budgetPlanned <= 0) {
+      out.push({
+        id: `budget-${o.id}`,
+        priority: "INFO",
+        kind: "BUDGET_NO_PLAN",
+        title: `${o.acronym ?? o.name} — spending without approved budget`,
+        detail: `${formatPHP(o.budgetActual)} spent but no approved activity budget is on record.`,
+        why: "Rule: recorded actual spending with no approved budget is surfaced for data completion.",
+        orgId: o.id,
+        href: `/analytics/org/${o.id}`,
+      });
+    }
+  }
+  return out;
+}
+
+function formatPHP(n: number): string {
+  return n.toLocaleString("en-PH", { style: "currency", currency: "PHP", maximumFractionDigits: 0 });
+}
+
+// ---------------------------------------------------------------------------
+// M&E evaluation (rubric-based, entered by officers — never invented)
+// ---------------------------------------------------------------------------
+
+export const EVALUATION_DIMENSIONS = [
+  { key: "relevance", label: "Relevance" },
+  { key: "impact", label: "Impact" },
+  { key: "efficiency", label: "Efficiency" },
+  { key: "sustainability", label: "Sustainability" },
+] as const;
+
+export type EvaluationStats = {
+  count: number;
+  avgPct: number | null;
+  dims: { label: string; avg: number; pct: number }[];
+};
+
+/**
+ * Aggregate an explicit 1-5 rubric evaluation. The percentage scale is
+ * derived strictly from the rubric (1→0%, 5→100%); only rows actually entered
+ * by officers are counted.
+ */
+export function evaluateStats(
+  evals: { relevance: number; impact: number; efficiency: number; sustainability: number }[]
+): EvaluationStats {
+  if (evals.length === 0) {
+    return { count: 0, avgPct: null, dims: EVALUATION_DIMENSIONS.map((d) => ({ label: d.label, avg: 0, pct: 0 })) };
+  }
+  const sum = (k: (typeof EVALUATION_DIMENSIONS)[number]["key"]) =>
+    evals.reduce((s, e) => s + e[k], 0) / evals.length;
+  const dims = EVALUATION_DIMENSIONS.map((d) => {
+    const avg = Math.round(sum(d.key) * 10) / 10;
+    return { label: d.label, avg, pct: Math.round(((avg - 1) / 4) * 100) };
+  });
+  const overallAvg = dims.reduce((s, d) => s + d.avg, 0) / dims.length;
+  return { count: evals.length, avgPct: Math.round(((overallAvg - 1) / 4) * 100), dims };
+}
+
+// ---------------------------------------------------------------------------
+// Data-quality checks (explicit integrity rules over existing rows)
+// ---------------------------------------------------------------------------
+
+export type DataIssueSeverity = "HIGH" | "MEDIUM" | "INFO";
+
+export type DataIssue = {
+  id: string;
+  severity: DataIssueSeverity;
+  kind: string;
+  title: string;
+  detail: string;
+  why: string;
+  orgId: string | null;
+  href: string;
+};
+
+/**
+ * Rule-based integrity flags. Each rule is a simple predicate over live rows;
+ * the output is advisory for OSAS so bad or orphaned records can be fixed.
+ */
+export function dataQualityChecks(
+  orgs: OrgSnapshot[],
+  ay: string
+): DataIssue[] {
+  const issues: DataIssue[] = [];
+  const push = (i: DataIssue) => issues.push(i);
+
+  for (const o of orgs) {
+    if (o.status !== "ACTIVE") continue;
+    const name = o.acronym ?? o.name;
+    const memberCount = o.members.length;
+
+    if (memberCount === 0) {
+      push({
+        id: `nomem-${o.id}`,
+        severity: "MEDIUM",
+        kind: "NO_MEMBERS",
+        title: `${name} — no current members`,
+        detail: "An active organization has no current membership rows.",
+        why: "Rule: an ACTIVE organization is expected to have at least one current member.",
+        orgId: o.id,
+        href: `/organizations/${o.id}`,
+      });
+    } else {
+      const officers = o.members.filter((m) => m.position === "PRESIDENT" || m.position === "SECRETARY").length;
+      if (officers === 0) {
+        push({
+          id: `nooff-${o.id}`,
+          severity: "HIGH",
+          kind: "NO_OFFICERS",
+          title: `${name} — no president or secretary on record`,
+          detail: `${memberCount} members, but no officer occupying the president or secretary position.`,
+          why: "Rule: an organization cannot complete signature routing without a current PRESIDENT/SECRETARY member.",
+          orgId: o.id,
+          href: `/organizations/${o.id}`,
+        });
+      }
+      const stale = o.members.filter((m) => m.status === "INACTIVE").length;
+      if (stale > 0) {
+        push({
+          id: `stale-${o.id}`,
+          severity: "INFO",
+          kind: "STALE_MEMBERS",
+          title: `${name} — ${stale} current member row${stale === 1 ? "" : "s"} inactive`,
+          detail: "Current membership rows carry an INACTIVE status, which usually means they are missing a deactivation date.",
+          why: "Rule: a member row flagged isCurrent should not also carry the INACTIVE lifecycle status.",
+          orgId: o.id,
+          href: `/organizations/${o.id}`,
+        });
+      }
+    }
+
+    const completedUnattended = o.activities
+      .filter((a) => a.academicYear === ay && ["ACCOMPLISHMENT", "ARCHIVE"].includes(a.phase ?? ""))
+      .filter((a) => (a.attendanceCount ?? 0) === 0).length;
+    if (completedUnattended > 0) {
+      push({
+        id: `att-${o.id}`,
+        severity: "MEDIUM",
+        kind: "COMPLETED_WITHOUT_ATTENDANCE",
+        title: `${name} — ${completedUnattended} completed activit${completedUnattended === 1 ? "y" : "ies"} with no attendance records`,
+        detail: "Finished activities should have a recorded attendance count for M&E.",
+        why: "Rule: a completed activity (ACCOMPLISHMENT/ARCHIVE phase) with zero attendance records is a capture gap.",
+        orgId: o.id,
+        href: `/activities`,
+      });
+    }
+
+    const rec = o.recognitions.filter((r) => r.academicYear === ay && (r.status === "APPROVED" || r.status === "RECOGNIZED"));
+    if (rec.length > 0) {
+      const tagged = o.requirementFiles.filter((f) => f.academicYear === ay).length;
+      if (tagged === 0) {
+        push({
+          id: `docs-${o.id}`,
+          severity: "INFO",
+          kind: "RECOGNIZED_WITHOUT_DOCS",
+          title: `${name} — recognized without tagged requirement files`,
+          detail: "The accreditation was decided but no stored file is linked to any SF-001 checklist item.",
+          why: "Rule: a recognized application is expected to have the tagged requirement documents in the repository.",
+          orgId: o.id,
+          href: `/organizations/${o.id}/documents`,
+        });
+      }
+    }
+  }
+
+  const rank = { HIGH: 0, MEDIUM: 1, INFO: 2 } as const;
+  return issues.sort((a, b) => rank[a.severity] - rank[b.severity]);
+}

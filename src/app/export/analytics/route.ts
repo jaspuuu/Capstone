@@ -8,6 +8,8 @@ import { ORG_TYPE_LABELS, RECOGNITION_STATUS_META } from "@/lib/constants";
 import {
   assessRisk,
   bottleneckAlerts,
+  budgetAlerts,
+  budgetUtilizationPct,
   compliancePct,
   financialAlerts,
   financialCompliance,
@@ -60,6 +62,9 @@ export async function GET(request: Request) {
       "Activities completed",
       "Activities planned",
       "Completion %",
+      "Budget planned",
+      "Budget actual",
+      "Utilization %",
       "Risk",
       "Days to nearest deadline",
     ],
@@ -91,6 +96,9 @@ type Row = {
   completed: number;
   planned: number;
   completionPct: number | null;
+  budgetPlanned: number;
+  budgetActual: number;
+  budgetUtil: number | null;
   risk: string;
   deadlineIn: string;
 };
@@ -248,6 +256,9 @@ async function loadAnalytics(
       completed: mon?.completed ?? 0,
       planned: mon?.planned ?? 0,
       completionPct: mon ? activityCompletionPct(mon.planned, mon.completed) : null,
+      budgetPlanned: mon?.budgetPlanned ?? 0,
+      budgetActual: mon?.budgetActual ?? 0,
+      budgetUtil: mon ? budgetUtilizationPct(mon.budgetPlanned, mon.budgetActual) : null,
       risk: risk ? (risk.level === "AT_RISK" ? `At Risk (${risk.unmet.length} unmet)` : `Due Soon (${risk.unmet.length} unmet)`) : "",
       deadlineIn: deadlineAt != null ? `${Math.max(0, Math.ceil((deadlineAt - now.getTime()) / 86_400_000))} day(s)` : "",
     };
@@ -264,6 +275,9 @@ async function loadAnalytics(
       row.completed,
       row.planned,
       row.completionPct ?? "",
+      row.budgetPlanned > 0 ? row.budgetPlanned : "",
+      row.budgetActual > 0 ? row.budgetActual : "",
+      row.budgetUtil != null ? `${row.budgetUtil}%` : "",
       row.risk,
       row.deadlineIn,
     ];
@@ -292,6 +306,7 @@ async function loadAnalytics(
     ...riskAlerts(risks).filter((a) => a.orgId && scopeIds.has(a.orgId ?? "")),
     ...financialAlerts(snapshots, ay, deadlines, collegeIdByOrg).filter((a) => scopeIds.has(a.orgId ?? "")),
     ...reportAlerts(monitored.map((m) => ({ orgId: m.id, orgName: m.acronym ?? m.name, count: m.endedWithoutReport.length }))),
+    ...budgetAlerts(monitored).filter((a) => a.orgId && scopeIds.has(a.orgId ?? "")),
     ...stalledAlerts(stalled),
     ...(can(user, "analytics.view") ? bottleneckAlerts(signatureBottlenecks(currentSteps)) : []),
   ];

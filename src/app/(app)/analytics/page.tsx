@@ -4,7 +4,7 @@ import { Activity, Award, CalendarCheck, Flag, ListChecks, ShieldAlert, Users } 
 import { requireUser } from "@/lib/auth/guards";
 import { can, scopedOrgWhere } from "@/lib/auth/rbac";
 import { db } from "@/lib/db";
-import { currentAcademicYear, formatDate } from "@/lib/utils";
+import { currentAcademicYear, formatDate, formatMoney } from "@/lib/utils";
 import type { OrgType } from "@/generated/prisma/client";
 import {
   activityCompleteTrend,
@@ -12,10 +12,14 @@ import {
   activityTrend,
   assessRisk,
   bottleneckAlerts,
+  budgetAlerts,
+  budgetUtilizationPct,
   complianceByYear,
   complianceDelta,
   compliancePct,
+  dataQualityChecks,
   diagnoseWorkflow,
+  evaluateStats,
   financialAlerts,
   financialCompliance,
   pctChange,
@@ -196,8 +200,9 @@ export default async function AnalyticsPage({
           startAt: true,
           endAt: true,
           expectedParticipants: true,
+          estimatedBudget: true,
           _count: { select: { attendanceRecords: true } },
-          report: { select: { status: true, actualParticipants: true } },
+          report: { select: { status: true, actualParticipants: true, actualBudget: true } },
         },
       },
     },
@@ -207,7 +212,7 @@ export default async function AnalyticsPage({
   const collegeIdByOrg = Object.fromEntries(orgsRaw.map((o) => [o.id, o.collegeId]));
   const collegeOpts = [...new Map(orgsRaw.map((o) => [o.college.id, o.college])).values()];
 
-  const [taggedFiles, deadlines, memberRows, events, currentSteps] = await Promise.all([
+  const [taggedFiles, deadlines, memberRows, events, currentSteps, evaluations] = await Promise.all([
     db.attachment.findMany({
       where: { entityType: "Recognition", kind: { not: null }, entityId: { in: recIds } },
       select: { entityId: true, kind: true, createdAt: true },
@@ -228,6 +233,16 @@ export default async function AnalyticsPage({
     db.signatureStep.findMany({
       where: { status: "CURRENT", route: { entityType: "SF" } },
       select: { role: true },
+    }),
+    db.activityEvaluation.findMany({
+      where: { activity: { organizationId: { in: orgIds }, academicYear: ay } },
+      select: {
+        relevance: true,
+        impact: true,
+        efficiency: true,
+        sustainability: true,
+        activity: { select: { organizationId: true, title: true } },
+      },
     }),
   ]);
   const taggedByRec = new Map<string, { kind: string; createdAt: Date }[]>();
@@ -257,9 +272,11 @@ export default async function AnalyticsPage({
       startAt: a.startAt,
       endAt: a.endAt,
       expectedParticipants: a.expectedParticipants,
+      estimatedBudget: a.estimatedBudget,
       attendanceCount: a._count.attendanceRecords,
       reportStatus: a.report?.status ?? null,
       actualParticipants: a.report?.actualParticipants ?? null,
+      actualBudget: a.report?.actualBudget ?? null,
     })),
     requirementFiles: o.recognitions.flatMap((r) =>
       (taggedByRec.get(r.id) ?? []).map((a) => ({ kind: a.kind as never, academicYear: r.academicYear, createdAt: a.createdAt }))
@@ -327,8 +344,8 @@ export default async function AnalyticsPage({
           venue: null,
           startAt: a.startAt!,
           endAt: a.endAt!,
-          estimatedBudget: null,
-          actualBudget: null,
+          estimatedBudget: a.estimatedBudget ?? null,
+          actualBudget: a.actualBudget ?? null,
           expectedParticipants: a.expectedParticipants ?? null,
           actualParticipants: a.actualParticipants ?? null,
           attendanceCount: a.attendanceCount ?? 0,
@@ -382,9 +399,16 @@ export default async function AnalyticsPage({
     ...financialAlertsList,
     ...reportAlertsList,
     ...stalledAlerts(stalled),
+    ...budgetAlerts(monitored).filter((a) => a.orgId && orgsScoped.some((o) => o.id === a.orgId)),
     ...(full ? bottleneckAlerts(bottleneckList) : []),
   ].sort((a, b) => PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority]);
   const priority = prioritySummary(alerts);
+
+  const budgetPlannedTotal = monitored.reduce((s, m) => s + m.budgetPlanned, 0);
+  const budgetActualTotal = monitored.reduce((s, m) => s + m.budgetActual, 0);
+  const budgetUtil = budgetUtilizationPct(budgetPlannedTotal, budgetActualTotal);
+  const realEval = evaluateStats(evaluations);
+  const dataIssues = dataQualityChecks(orgsScoped, ay);
 
   // ---- Matrix rows ---------------------------------------------------------------
   const matrixRows: MatrixRow[] = orgsScoped.map((o) => {
@@ -472,8 +496,7 @@ export default async function AnalyticsPage({
 
       <AnalyticsFilters
         options={{
-          years,
-          yearsLabel: (y) => y,
+          years: years.map((y) => ({ value: y, label: shortAY(y) })),
           defaultAY: currentAcademicYear(),
           orgs: orgsScoped.map((o) => ({ id: o.id, label: o.acronym ?? o.name })),
           colleges: collegeOpts.map((c) => c.name),
@@ -662,20 +685,49 @@ export default async function AnalyticsPage({
               </CardContent>
             </Card>
             <Card>
-              <CardHeader title="Monitoring & evaluation" description="Integrated evaluation indicators — counts and attendance, no invented rating." />
+              <CardHeader title="Monitoring & evaluation" description={realEval.count > 0 ? "Rubric-based evaluations entered by officers (1–5 scale, 5 = best)." : "Integrated evaluation indicators — counts and attendance, no invented rating."} />
               <CardContent>
-                {evaluationSummary(monitored, overallAttendance).loaded ? (
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                    <StatCard label="Orgs evaluated" value={evaluationSummary(monitored, overallAttendance).orgs} icon={ListChecks} />
-                    <StatCard label="Activities evaluated" value={evaluationSummary(monitored, overallAttendance).activities} icon={Activity} iconTone="info" />
-                    <StatCard label="Avg evaluation" value={evaluationSummary(monitored, overallAttendance).avg != null ? `${evaluationSummary(monitored, overallAttendance).avg}%` : "—"} icon={ShieldAlert} iconTone="warning" hint="attendance capture" />
-                  </div>
+                {realEval.count > 0 || evaluationSummary(monitored, overallAttendance).loaded ? (
+                  <>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                      <StatCard label="Orgs evaluated" value={realEval.count > 0 ? new Set(evaluations.map((e) => e.activity.organizationId)).size : evaluationSummary(monitored, overallAttendance).orgs} icon={ListChecks} />
+                      <StatCard label="Activities evaluated" value={realEval.count > 0 ? realEval.count : evaluationSummary(monitored, overallAttendance).activities} icon={Activity} iconTone="info" />
+                      <StatCard
+                        label="Average evaluation"
+                        value={realEval.avgPct != null ? `${realEval.avgPct}%` : evaluationSummary(monitored, overallAttendance).avg != null ? `${evaluationSummary(monitored, overallAttendance).avg}%` : "—"}
+                        icon={ShieldAlert}
+                        iconTone="warning"
+                        hint={realEval.avgPct != null ? "officer-entered rubric" : "attendance capture"}
+                      />
+                    </div>
+                    {realEval.count > 0 ? (
+                      <div className="mt-4 space-y-3">
+                        {realEval.dims.map((d) => (
+                          <HBar key={d.label} label={d.label} percent={d.pct} rightText={`avg ${d.avg}/5`} />
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="mt-3 text-xs text-content-secondary">
+                        No rubric evaluations entered yet — {evalHint(overallAttendance)}. The system records counts, percentages, budget and attendance; no grade scale is invented.
+                      </p>
+                    )}
+                  </>
                 ) : (
                   <NoData what="No activities with recorded evaluation indicators in this scope yet." />
                 )}
-                <p className="mt-3 text-xs text-content-secondary">
-                  The system records counts, percentages, budget and attendance — no grade scale is configured, so none is shown.
-                </p>
+                {budgetPlannedTotal > 0 && (
+                  <div className="mt-4 flex items-center justify-between gap-2 rounded-xl border border-line px-4 py-3">
+                    <div>
+                      <p className="text-sm font-semibold text-content">Budget utilization</p>
+                      <p className="text-xs text-content-secondary">
+                        {formatMoney(budgetActualTotal)} spent of {formatMoney(budgetPlannedTotal)} approved
+                      </p>
+                    </div>
+                    <span className={`font-display text-lg font-bold tabular-nums ${budgetUtil != null && budgetUtil > 105 ? "text-red-600" : "text-content"}`}>
+                      {budgetUtil != null ? `${budgetUtil}%` : "—"}
+                    </span>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>
@@ -724,6 +776,41 @@ export default async function AnalyticsPage({
             )}
           </SectionCard>
 
+          {/* Data-quality integrity flags */}
+          <SectionCard
+            className="mt-6"
+            title={`Data integrity (${dataIssues.length})`}
+            description="Rule-based flags for inconsistent or orphaned records in the current scope — fixing these cleans the analytics inputs."
+          >
+            {dataIssues.length === 0 ? (
+              <Alert tone="success" title="No data-quality flags">
+                No active organization in your scope triggers an integrity rule for {ay}.
+              </Alert>
+            ) : (
+              <ul className="space-y-3">
+                {dataIssues.map((d) => (
+                  <li key={d.id} className="rounded-xl border border-line p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-sm font-bold text-content">{d.title}</p>
+                      <Badge tone={d.severity === "HIGH" ? "danger" : d.severity === "MEDIUM" ? "warning" : "neutral"}>
+                        {d.severity}
+                      </Badge>
+                    </div>
+                    <p className="mt-1 text-xs text-content-secondary">{d.detail}</p>
+                    <p className="mt-2 rounded-lg bg-primary-light px-3 py-2 text-xs font-semibold text-primary">Rule: {d.why}</p>
+                    {d.href && (
+                      <div className="mt-2">
+                        <Link href={d.href} className="text-xs font-semibold text-primary hover:underline">
+                          Inspect →
+                        </Link>
+                      </div>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </SectionCard>
+
           {!full && (
             <p className="mt-6 text-xs text-content-muted">
               Your view is scoped to the organizations you can access ({orgsScoped.length}). OSAS/SOA and Deans see the full campus-wide workspace.
@@ -740,6 +827,10 @@ export default async function AnalyticsPage({
 function deltaHint(d: number | null, unit = "pts"): string | undefined {
   if (d == null) return undefined;
   return d > 0 ? `up ${d}${unit} from the previous cycle` : d < 0 ? `down ${Math.abs(d)}${unit} vs the previous cycle` : "flat vs the previous cycle";
+}
+
+function evalHint(avg: number | null): string {
+  return avg != null ? `fallback attendance capture averages ${avg}%` : "no attendance data either";
 }
 
 function deadlineAppliesLite(d: { scopeType: string; scopeCollegeId: string | null }, o: { type: string }, collegeId: string | null): boolean {

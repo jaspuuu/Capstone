@@ -9,6 +9,11 @@ import {
   getRouteWithSteps,
   resolveSigners,
 } from "@/lib/signature-routing";
+import {
+  hashChainStep,
+  signatureContentHash,
+  signatureContentPayload,
+} from "@/lib/signature-integrity";
 
 // ---------------------------------------------------------------------------
 // Signing actions (§10 explicit confirmation, §11 audit trail, §28 backend
@@ -40,9 +45,9 @@ export async function signCurrentStep(
       return { error: "You must explicitly confirm attaching your digital signature." };
     }
 
-    const route = await db.signatureRoute.findUnique({
+const route = await db.signatureRoute.findUnique({
       where: { id: routeId },
-      select: { id: true, entityType: true, entityId: true, formKey: true, title: true },
+      select: { id: true, entityType: true, entityId: true, formKey: true, title: true, version: true },
     });
     if (!route) return { error: "Routing record not found." };
 
@@ -63,17 +68,48 @@ export async function signCurrentStep(
       return { error: "Save a signature in My Signature first — signatures are never attached automatically." };
     }
 
+    const signedAt = new Date();
+    const contentHash = signatureContentHash(
+      signatureContentPayload({
+        entityType: route.entityType,
+        entityId: route.entityId,
+        formKey: route.formKey,
+        title: route.title,
+        version: route.version,
+        orgId: org.id,
+        academicYear: org.academicYear,
+      })
+    );
+
     await db.$transaction(async (tx) => {
-      await tx.signatureStep.update({
+      // Previous link in the chain (the most recent signed step, if any).
+      const prev = await tx.signatureStep.findFirst({
+        where: { routeId: route.id, order: { lt: step.order }, status: "SIGNED" },
+        orderBy: { order: "desc" },
+        select: { chainHash: true },
+      });
+      const chainHash = hashChainStep({
+        role: step.role,
+        signerId: user.id,
+        signedAt,
+        method: signer.signatureMethod,
+        contentHash,
+        prevChainHash: prev?.chainHash ?? null,
+      });
+
+await tx.signatureStep.update({
         where: { id: step.id },
         data: {
           status: "SIGNED",
           signerId: user.id,
           actedById: user.id,
-          signedAt: new Date(),
+          signedAt,
           signatureImage: signer.signatureImage,
           signatureTyped: signer.signatureTyped,
           signatureMethod: signer.signatureMethod,
+          contentHash,
+          prevChainHash: prev?.chainHash ?? null,
+          chainHash,
         },
       });
 
@@ -189,7 +225,7 @@ export async function resubmitRoute(
         where: { id: route.id },
         data: { state: "IN_PROGRESS" },
       });
-      // Fresh start: clear every step (version was already bumped on return).
+// Fresh start: clear every step (version was already bumped on return).
       await tx.signatureStep.updateMany({
         where: { routeId: route.id },
         data: {
@@ -200,6 +236,9 @@ export async function resubmitRoute(
           signatureMethod: null,
           comment: null,
           actedById: null,
+          contentHash: null,
+          prevChainHash: null,
+          chainHash: null,
         },
       });
       const newFirst = await tx.signatureStep.findFirst({

@@ -21,6 +21,7 @@ import { WorkflowSteps } from "@/components/ui/progress";
 import { ActionForm } from "@/components/action-form";
 import { AttachmentsCard } from "@/components/attachments-card";
 import { AttendanceCard } from "@/components/attendance-card";
+import { EvaluationForm } from "@/components/activities/evaluation-form";
 import {
   canManageAttendance,
   attendanceAllowedStatus,
@@ -67,6 +68,9 @@ export default async function ActivityDetailPage({
       },
       report: { select: { id: true, status: true } },
       decidedBy: { select: { firstName: true, lastName: true } },
+      evaluation: {
+        select: { relevance: true, impact: true, efficiency: true, sustainability: true, remarks: true, updatedAt: true },
+      },
     },
   });
   if (!proposal) notFound();
@@ -392,6 +396,22 @@ export default async function ActivityDetailPage({
                 organization: proposal.organization,
               })}
             />
+          )}
+
+          {can(user, "analytics.view") && (
+            <Card>
+              <CardHeader
+                title="Monitoring & evaluation"
+                description={
+                  proposal.evaluation
+                    ? "Rubric recorded for this activity (1–5)."
+                    : "No evaluation recorded yet for this activity."
+                }
+              />
+              <CardContent>
+                <EvaluationForm activityId={proposal.id} existing={proposal.evaluation} />
+              </CardContent>
+            </Card>
           )}
         </div>
 

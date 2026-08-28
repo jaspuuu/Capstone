@@ -4,6 +4,7 @@ import {
   ensureRoute,
   getRouteWithSteps,
 } from "@/lib/signature-routing";
+import { verifySignatureChain, type SignatureChainVerification } from "@/lib/signature-integrity";
 import { sfRouteEntityId } from "@/lib/form-routes";
 import { SignatureRoutePanel } from "@/components/forms/signature-route-panel";
 
@@ -30,6 +31,20 @@ export async function SignatureRouteSection({
   const route =
     (await getRouteWithSteps(entityType, entityId)) ??
     (await ensureRoute({ entityType, entityId, formKey, title, creatorId: user.id }));
+
+  const verification: SignatureChainVerification = verifySignatureChain(
+    route.steps.map((s) => ({
+      order: s.order,
+      role: s.role,
+      signedAt: s.signedAt,
+      status: s.status,
+      signatureMethod: s.signatureMethod,
+      signerId: s.signerId,
+      chainHash: s.chainHash,
+      prevChainHash: s.prevChainHash,
+      contentHash: s.contentHash,
+    }))
+  );
 
   let viewerCanSignNow = false;
   try {
@@ -64,6 +79,7 @@ export async function SignatureRouteSection({
       }}
       viewerId={user.id}
       viewerCanSignNow={viewerCanSignNow}
+      verification={verification}
     />
   );
 }
