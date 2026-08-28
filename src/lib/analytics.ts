@@ -7,11 +7,14 @@ import type {
   RecognitionKind,
   RecognitionStatus,
   ReportStatus,
+  SignatoryRole,
 } from "@/generated/prisma/client";
 import {
   ATTACHMENT_KIND_LABELS,
   type AttachmentKind,
 } from "@/lib/attachments";
+import { SIGNATORY_LABELS } from "@/lib/form-routes";
+import { RECOGNITION_WORKFLOW, transitionFor } from "@/lib/workflow";
 
 /**
  * Five-layer analytics model (capstone proposal, "Data Analytics"):
@@ -31,9 +34,24 @@ export type OrgSnapshot = {
   type: OrgType;
   status: string;
   collegeName: string | null;
-  members: { position: string }[];
+  members: { position: string; status?: string }[];
   recognitions: { kind: RecognitionKind; academicYear: string; status: RecognitionStatus }[];
-  activities: { academicYear: string; status: string; phase: string | null; scope: ActivityScope }[];
+  activities: {
+    academicYear: string;
+    status: string;
+    phase: string | null;
+    scope: ActivityScope;
+    /** Present when the analytics page fetches the monitoring-detail shape. */
+    id?: string;
+    startAt?: Date;
+    endAt?: Date;
+    expectedParticipants?: number | null;
+    estimatedBudget?: number | null;
+    attendanceCount?: number;
+    reportStatus?: string | null;
+    actualParticipants?: number | null;
+    actualBudget?: number | null;
+  }[];
   reports: { academicYear: string; status: ReportStatus }[];
   /** Tagged SF-001 checklist files on this org's recognitions, by AY. */
   requirementFiles: { kind: AttachmentKind; academicYear: string; createdAt: Date }[];
@@ -584,4 +602,283 @@ export function assessRisk(
     if (a.level !== b.level) return a.level === "AT_RISK" ? -1 : 1;
     return a.unmet[0].daysLeft - b.unmet[0].daysLeft;
   });
+}
+
+// ---------------------------------------------------------------------------
+// Analytics module (PA 5 / analytics prompt) — the same five layers, computed
+// over the richer monitoring shape. All inputs are projections of real rows;
+// nothing is invented, forecast, or scored outside an explicit rule.
+// ---------------------------------------------------------------------------
+
+// --- Descriptive: cycle-level compliance trend ---------------------------------
+
+/** How many of the seven checklist items an org has met in a given AY. */
+export function compliancePctYear(o: OrgSnapshot, ay: string): number | null {
+  const represented =
+    o.recognitions.some((r) => r.academicYear === ay) ||
+    o.reports.some((r) => r.academicYear === ay) ||
+    o.requirementFiles.some((f) => f.academicYear === ay) ||
+    o.activities.some((a) => a.academicYear === ay);
+  if (!represented) return null;
+  return compliancePct(checklistForYear(o.recognitions, o.requirementFiles, o.reports, ay));
+}
+
+/** Average compliance % per cycle (null when no org is represented that year). */
+export function complianceByYear(orgs: OrgSnapshot[]): CyclePoint[] {
+  return cycleYears(orgs)
+    .map((ay) => {
+      const scores = orgs
+        .map((o) => compliancePctYear(o, ay))
+        .filter((p): p is number => p != null);
+      if (scores.length === 0) return null;
+      return { label: shortAY(ay), value: Math.round(scores.reduce((s, p) => s + p, 0) / scores.length) };
+    })
+    .filter((p): p is CyclePoint => p != null);
+}
+
+/** Percentage-point change between the two most recent cycles, else null. */
+export function complianceDelta(points: CyclePoint[]): number | null {
+  if (points.length < 2) return null;
+  return points[points.length - 1].value - points[points.length - 2].value;
+}
+
+export type CyclePoint = { label: string; value: number };
+
+function cycleYears(orgs: OrgSnapshot[]): string[] {
+  const years = new Set<string>();
+  for (const o of orgs) {
+    for (const r of o.recognitions) years.add(r.academicYear);
+    for (const f of o.requirementFiles) years.add(f.academicYear);
+    for (const r of o.reports) years.add(r.academicYear);
+    for (const a of o.activities) years.add(a.academicYear);
+  }
+  return [...years].sort();
+}
+
+// --- Descriptive: activity pipeline per cycle ----------------------------------
+
+export type ActivityTrendRow = { label: string; planned: number; approved: number; completed: number };
+
+export function activityTrend(orgs: OrgSnapshot[]): ActivityTrendRow[] {
+  const byAY = new Map<string, ActivityTrendRow>();
+  for (const o of orgs) {
+    for (const a of o.activities) {
+      const row = byAY.get(a.academicYear) ?? { label: shortAY(a.academicYear), planned: 0, approved: 0, completed: 0 };
+      row.planned += 1;
+      if (a.status === "APPROVED") row.approved += 1;
+      if (["ACCOMPLISHMENT", "ARCHIVE"].includes(a.phase ?? "")) row.completed += 1;
+      byAY.set(a.academicYear, row);
+    }
+  }
+  return [...byAY.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([, row]) => row);
+}
+
+/** Implementation rate: completed / approved-and-planned activities, or null. */
+export function activityCompletionPct(planned: number, completed: number): number | null {
+  if (planned <= 0) return null;
+  return Math.round((completed / planned) * 100);
+}
+
+/** Activity implementation rate (%) per cycle line. */
+export function activityCompleteTrend(orgs: OrgSnapshot[]): CyclePoint[] {
+  return activityTrend(orgs)
+    .map((row) => {
+      const pct = activityCompletionPct(row.planned, row.completed);
+      return pct == null ? null : { label: row.label, value: pct };
+    })
+    .filter((p): p is CyclePoint => p != null);
+}
+
+// --- Diagnostic: workflow stage delays from RecognitionEvent timestamps ---------
+
+export type WorkflowStageDelay = { stage: string; days: number };
+
+const WORKFLOW_MILESTONE_ACTIONS = new Set([
+  "SUBMIT",
+  "START_REVIEW",
+  "ENDORSE",
+  "ADVANCE_TO_SIGNATURE",
+  "APPROVE",
+  "CONFER",
+  "RETURN",
+]);
+
+function milestoneLabel(action: string): string {
+  const t = transitionFor(RECOGNITION_WORKFLOW, action);
+  if (t) return t.label;
+  return action;
+}
+
+/**
+ * Average calendar days between consecutive recorded recognition actions at
+ * each configured workflow milestone ("Submit application", "Start review",
+ * "Endorse for approval", "Forward for signature", "Approve application",
+ * "Confer recognition"). Only stages present in the configured workflow and
+ * with recorded timestamps are emitted.
+ */
+export function diagnoseWorkflow(
+  events: { recognitionId: string; action: string; createdAt: Date }[]
+): WorkflowStageDelay[] {
+  const byRec = new Map<string, { action: string; createdAt: Date }[]>();
+  for (const e of events) {
+    const list = byRec.get(e.recognitionId) ?? [];
+    list.push({ action: e.action, createdAt: e.createdAt });
+    byRec.set(e.recognitionId, list);
+  }
+  const acc = new Map<string, number[]>();
+  for (const rows of byRec.values()) {
+    rows.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+    for (let i = 1; i < rows.length; i++) {
+      if (!WORKFLOW_MILESTONE_ACTIONS.has(rows[i].action)) continue;
+      const prev = rows[i - 1];
+      if (prev.createdAt.getTime() >= rows[i].createdAt.getTime()) continue;
+      const days = (rows[i].createdAt.getTime() - prev.createdAt.getTime()) / 86_400_000;
+      const stage = milestoneLabel(rows[i].action);
+      const list = acc.get(stage) ?? [];
+      list.push(days);
+      acc.set(stage, list);
+    }
+  }
+  return [...acc.entries()]
+    .map(([stage, xs]) => ({
+      stage,
+      days: Math.round((xs.reduce((s, x) => s + x, 0) / xs.length) * 10) / 10,
+    }))
+    .sort((a, b) => b.days - a.days);
+}
+
+// --- Diagnostic: signature-route bottlenecks -------------------------------------
+
+export type SignatureBottleneck = { role: SignatoryRole; label: string; count: number };
+
+/** Documents currently awaiting action, grouped by signatory role. */
+export function signatureBottlenecks(steps: { role: SignatoryRole }[]): SignatureBottleneck[] {
+  const counts = new Map<SignatoryRole, number>();
+  for (const s of steps) counts.set(s.role, (counts.get(s.role) ?? 0) + 1);
+  return [...counts.entries()]
+    .map(([role, count]) => ({ role, label: SIGNATORY_LABELS[role] ?? role, count }))
+    .sort((a, b) => b.count - a.count);
+}
+
+// --- Layers 4 & 5: explicit alert rules + rule-based recommendations --------------
+
+export type AlertPriority = "CRITICAL" | "HIGH" | "MEDIUM" | "INFO";
+
+export type AnalyticsAlert = {
+  id: string;
+  priority: AlertPriority;
+  kind: string;
+  title: string;
+  detail: string;
+  why: string;
+  orgId: string | null;
+  href: string;
+};
+
+export const PRIORITY_META: Record<AlertPriority, { tone: "danger" | "warning" | "info" | "neutral"; label: string }> = {
+  CRITICAL: { tone: "danger", label: "Critical" },
+  HIGH: { tone: "warning", label: "High" },
+  MEDIUM: { tone: "info", label: "Medium" },
+  INFO: { tone: "neutral", label: "Informational" },
+};
+
+/** CAPS rule (alerting) + predefined action map (prescriptive). */
+export function riskAlerts(risks: OrgRisk[]): AnalyticsAlert[] {
+  return risks.map((r, i) => {
+    const critical = r.level === "AT_RISK";
+    return {
+      id: `risk-${i}`,
+      priority: critical ? "CRITICAL" : "HIGH",
+      kind: critical ? "AT_RISK" : "DUE_SOON",
+      title: `${r.orgName} — ${critical ? "At Risk" : "Due Soon"}`,
+      detail: `${r.unmet.length} unmet requirement${r.unmet.length === 1 ? "" : "s"} · ${r.unmet[0].overdue ? Math.abs(r.unmet[0].daysLeft) + " day(s) overdue" : r.unmet[0].daysLeft + " day(s) to deadline"}`,
+      why: critical
+        ? `Rule: an organization is At Risk when it has ${RISK_MIN_UNMET} or more unmet requirements within ${RISK_WINDOW_DAYS} days of the submission deadline.`
+        : `Rule: one unmet requirement is due within ${RISK_WINDOW_DAYS} days of the submission deadline.`,
+      orgId: r.orgId,
+      href: `/analytics/org/${r.orgId}`,
+    };
+  });
+}
+
+/** Financial report overdue → Critical; flagged the day the deadline passes. */
+export function financialAlerts(
+  orgs: OrgSnapshot[],
+  ay: string,
+  deadlines: DeadlineLite[],
+  collegeIdByOrg: Record<string, string | null>
+): AnalyticsAlert[] {
+  return orgs
+    .filter((o) => o.status === "ACTIVE" && financialCompliance(o, ay, deadlines, collegeIdByOrg[o.id]) === "OVERDUE")
+    .map((o): AnalyticsAlert => ({
+      id: `fin-${o.id}`,
+      priority: "CRITICAL",
+      kind: "FINANCIAL_OVERDUE",
+      title: `${o.acronym ?? o.name} — financial report overdue`,
+      detail: "The accreditation Financial Report has not been submitted after the deadline.",
+      why: "Rule: financial compliance is flagged Overdue once any applicable accreditation deadline for the year has passed without the report.",
+      orgId: o.id,
+      href: `/analytics/org/${o.id}`,
+    }))
+    .filter((a, i, all) => all.findIndex((x) => x.orgId === a.orgId) === i);
+}
+
+/** Ended-but-unreported activities → High. */
+export function reportAlerts(endedWithoutReport: { orgId: string; orgName: string; count: number }[]): AnalyticsAlert[] {
+  return endedWithoutReport
+    .filter((e) => e.count > 0)
+    .map((e): AnalyticsAlert => ({
+      id: `rep-${e.orgId}`,
+      priority: "HIGH",
+      kind: "REPORT_MISSING",
+      title: `${e.orgName} — ${e.count} ended activity${e.count === 1 ? "" : "ies"} without an accomplishment report`,
+      detail: "Monitoring flags these activities for evaluation follow-up.",
+      why: "Rule: an activity whose end date has passed without a linked accomplishment report is marked as needing evaluation.",
+      orgId: e.orgId,
+      href: `/monitoring`,
+    }))
+    .filter((a, i, all) => all.findIndex((x) => x.orgId === a.orgId) === i);
+}
+
+export const STALL_WORKFLOW_DAYS = 14;
+
+/** Documents stalled in a workflow status past the configured threshold. */
+export function stalledAlerts(
+  stalled: { entityId: string; orgId: string; orgName: string; kind: string; status: string; updatedAt: Date }[]
+): AnalyticsAlert[] {
+  return stalled.map((s, i) => ({
+    id: `stall-${i}`,
+    priority: "MEDIUM",
+    kind: "STALLED_WORKFLOW",
+    title: `${s.orgName} — ${s.kind} stalled at “${s.status}”`,
+    detail: `No movement for ${Math.round((Date.now() - s.updatedAt.getTime()) / 86_400_000)} days.`,
+    why: `Rule: a workflow document is flagged when it has not moved for ${STALL_WORKFLOW_DAYS}+ days.`,
+    orgId: s.orgId,
+    href: s.entityId,
+  }));
+}
+
+/** Awaiting-action document counts per signatory (from CURRENT signature steps). */
+export function bottleneckAlerts(bottlenecks: SignatureBottleneck[]): AnalyticsAlert[] {
+  return bottlenecks.map((b): AnalyticsAlert => ({
+    id: `bn-${b.role}`,
+    priority: b.count >= 5 ? "MEDIUM" : "INFO",
+    kind: "SIGNATURE_BOTTLENECK",
+    title: `${b.count} document${b.count === 1 ? "" : "s"} awaiting action at ${b.label}`,
+    detail: "Signature-routed forms currently parked at this role.",
+    why: "Rule: every routed document has exactly one CURRENT signatory; a large awaiting queue is surfaced for administrative follow-up.",
+    orgId: null,
+    href: "/forms",
+  }));
+}
+
+export function prioritySummary(alerts: AnalyticsAlert[]): Record<AlertPriority, number> {
+  return {
+    CRITICAL: alerts.filter((a) => a.priority === "CRITICAL").length,
+    HIGH: alerts.filter((a) => a.priority === "HIGH").length,
+    MEDIUM: alerts.filter((a) => a.priority === "MEDIUM").length,
+    INFO: alerts.filter((a) => a.priority === "INFO").length,
+  };
 }

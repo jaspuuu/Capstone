@@ -35,7 +35,7 @@ export const NAV_SECTIONS: NavSection[] = [
     items: [
       { href: "/dashboard", label: "Dashboard", icon: "dashboard", permission: "org.view" },
       { href: "/monitoring", label: "Activity Monitoring", icon: "monitoring", permission: "org.view" },
-      { href: "/analytics", label: "Analytics", icon: "analytics", permission: "analytics.view" },
+      { href: "/analytics", label: "Analytics", icon: "analytics", permission: "org.view" },
     ],
   },
   {

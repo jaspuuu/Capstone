@@ -97,3 +97,21 @@ Redesign pass over the *existing* interface only — no rebuild, no invented bus
 ### Remaining UI chunks (proposed order)
 
 All planned UI chunks (A–E) are now Done. Optional follow-up, behavior-preserving: scope adviser "university deadlines" to the adviser's assigned orgs rather than campus-wide (low value; daily-list form is already driven by the same deadline query).
+
+## Analytics module optimization (28-section prompt)
+
+Implemented per the "ANALYTICS MODULE OPTIMIZATION PROMPT": five layers (descriptive → diagnostic → trend → rule-based alerting → rule-based prescriptive), statistics/fixed rules only — no ML, no forecasting, no invented ratings. All computation is frequency counts, percentage distributions, and explicit threshold rules.
+
+| Prompt area | Built as | Where |
+| --- | --- | --- |
+| Five layers | Descriptive KPIs (org mix, accreditation % avg, financial, activity completion) → matrix; diagnostics (requirements gaps, workflow stage delays, signature bottlenecks); trends (compliance, membership, activities filed, implementation rate); rule-based alerts; rule-based recommendation text on every alert | `src/lib/analytics.ts`, `src/app/(app)/analytics/page.tsx` |
+| Compliance = actual tracked requirements | SF-001 checklist compares tagged attachments on the org's AY recognitions (`requirementsChecklist`/`compliancePct`); financial compliance strictly Submitted/Overdue/Unsubmitted; never "application exists" | `src/lib/analytics.ts` |
+| Rule-based alert engine (§20 etc.) | Fixed rules only: At Risk = ≥2 unmet requirements within 7 days of an applicable deadline; Due Soon = 1 unmet within 7 days (CAPS mirror); financial Overdue once the deadline passes; ended-but-unreported activities; workflows stalled ≥14 days; CURRENT signatory queues. Every alert carries its rule text ("Why") + a predefined action ("Recommend/consult/remind") | `riskAlerts`/`financialAlerts`/`reportAlerts`/`stalledAlerts`/`bottleneckAlerts` in `src/lib/analytics.ts`, `STALL_WORKFLOW_DAYS`, `RISK_WINDOW_DAYS` |
+| Drill-down Number→Explanation→Record→Action (§23) | `/analytics/org/[id]` — each org state is explained (recognition badge + %, financial badge, officer ratio 1:N, attendance, requirement checklist, applicable deadlines, activities with attendance) with links to the underlying records | `src/app/(app)/analytics/org/[id]/page.tsx` |
+| Role-specific analytics (§21) | Page branches: FULL workspace for OSAS/SOA/Dean (`analytics.view`), org-scoped workspace for advisers/officers via `orgScopeWhere`, personal-only view for MEMBER (their attendance/memberships). Nav entry now `org.view` so every role sees Analytics; page content still branch-scoped | `src/app/(app)/analytics/page.tsx`, `src/lib/nav.ts` |
+| Filters → data attributes | Academic Year (default current), Organization, College, Type, Recognition status — all map to real columns/derived states; "No application" is an explicit option | `src/components/analytics/analytics-filters.tsx` |
+| Export | CSV respecting the same scope + filters (matrix + alerts w/ rule text); OSAS/SOA/Dean only via `requireExporter()` | `src/app/export/analytics/route.ts` |
+| Data integrity (0 vs No Data) (§25) | `NoData` guard everywhere a state is unreported; activity completion shows "—" (none planned) vs "0%"; donut/line/bars print values so no insight depends on color alone | `src/components/analytics/analytics-parts.tsx`, `src/components/ui/charts.tsx` |
+| Visualization rules (§26 etc.) | Donut for small distributions, bars for comparisons, lines for trends, tables for records, horizontal bars for rankings; no invented M&E grade (system has no rating model — counts/percentages only) | `src/components/ui/charts.tsx` (added `DonutChart`) |
+
+Data model note: `RecognitionEvent.action/createdAt` drives per-milestone stage delays (`diagnoseWorkflow`, configured-workflow actions only); `SignatureStep.status=CURRENT` drives bottleneck counts; attendance "actual" = `ActivityAttendance` rows.

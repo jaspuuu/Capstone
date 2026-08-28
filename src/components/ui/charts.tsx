@@ -139,3 +139,80 @@ export function ProportionBar({
     </div>
   );
 }
+
+export type SliceTone = "success" | "danger" | "warning" | "info" | "neutral" | "muted";
+
+const SLICE_TONES: Record<SliceTone, { stroke: string; bg: string }> = {
+  success: { stroke: "stroke-success", bg: "bg-success" },
+  danger: { stroke: "stroke-danger", bg: "bg-danger" },
+  warning: { stroke: "stroke-warning", bg: "bg-warning" },
+  info: { stroke: "stroke-info", bg: "bg-info" },
+  neutral: { stroke: "stroke-line-strong", bg: "bg-content-muted" },
+  muted: { stroke: "stroke-surface-secondary", bg: "bg-surface-secondary" },
+};
+
+export type Slice = { label: string; value: number; tone: SliceTone };
+
+/**
+ * Donut chart for small status distributions (≤6 categories). Values are
+ * always printed next to the legend, so no insight depends on color alone.
+ */
+export function DonutChart({
+  data,
+  ariaLabel,
+  size = 108,
+}: {
+  data: Slice[];
+  ariaLabel: string;
+  size?: number;
+}) {
+  const total = data.reduce((s, d) => s + d.value, 0);
+  const R = 40;
+  const C = 2 * Math.PI * R;
+  let acc = 0;
+  return (
+    <figure className="flex items-center gap-4">
+      <svg
+        viewBox="0 0 100 100"
+        width={size}
+        height={size}
+        className="shrink-0"
+        role="img"
+        aria-label={total > 0 ? ariaLabel : `${ariaLabel} — no data`}
+      >
+        <circle cx="50" cy="50" r={R} fill="none" strokeWidth={18} className="stroke-surface-secondary" />
+        {total > 0 &&
+          data.map((d) => {
+            const frac = d.value / total;
+            const dash = frac * C;
+            const offset = -acc * C;
+            acc += frac;
+            if (frac <= 0) return null;
+            return (
+              <circle
+                key={d.label}
+                cx="50"
+                cy="50"
+                r={R}
+                fill="none"
+                strokeWidth={18}
+                strokeDasharray={`${dash} ${C - dash}`}
+                strokeDashoffset={offset}
+                transform="rotate(-90 50 50)"
+                className={SLICE_TONES[d.tone].stroke}
+              />
+            );
+          })}
+      </svg>
+      <figcaption className="grow space-y-1 text-xs">
+        {data.map((d) => (
+          <div key={d.label} className="flex items-center gap-2">
+            <span className={cn("size-2.5 shrink-0 rounded-full", SLICE_TONES[d.tone].bg)} aria-hidden />
+            <span className="text-content-secondary">{d.label}</span>
+            <span className="ml-auto font-semibold tabular-nums text-content">{d.value}</span>
+          </div>
+        ))}
+      </figcaption>
+    </figure>
+  );
+}
