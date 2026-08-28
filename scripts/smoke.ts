@@ -139,6 +139,96 @@ async function main() {
     rec("fixture: seeded recognition exists", false, "no Recognition rows — run `npm run db:seed`");
   }
 
+  // ---- Full app route sweep: hydrate every gated screen as OSAS -------------
+  const sweep = async (label: string, path: string, marker?: string) => {
+    const { status, text } = await fetchText(path, tokens.OSAS);
+    rec(`${label} 200`, status === 200, `${path} status=${status}`);
+    rec(`${label} not login`, !text.includes(LOGIN_MARKER), path);
+    if (marker) rec(`${label} shows ${marker.slice(0, 24)}`, text.includes(marker), path);
+  };
+
+  await sweep("OSAS /dashboard", "/dashboard");
+  await sweep("OSAS /activities", "/activities", "Activity Proposals");
+  await sweep("OSAS /activities/new", "/activities/new");
+  await sweep("OSAS /calendar", "/calendar", "Activity Calendar");
+  await sweep("OSAS /colleges", "/colleges", "Colleges");
+  await sweep("OSAS /deadlines", "/deadlines", "Deadlines");
+  await sweep("OSAS /deadlines/new", "/deadlines/new");
+  await sweep("OSAS /audit-log", "/audit-log", "Audit log");
+  await sweep("OSAS /notifications", "/notifications", "Notifications");
+  await sweep("OSAS /organizations", "/organizations", "Organizations");
+  await sweep("OSAS /organizations/new", "/organizations/new");
+  await sweep("OSAS /profile", "/profile", "My profile");
+  await sweep("OSAS /profile/signature", "/profile/signature", "My signature");
+  await sweep("OSAS /recognition", "/recognition", "Recognition");
+  await sweep("OSAS /recognition/new", "/recognition/new", "New recognition application");
+  await sweep("OSAS /reports", "/reports", "Accomplishment Reports");
+  await sweep("OSAS /reports/new", "/reports/new");
+  await sweep("OSAS /users", "/users", "User accounts");
+  await sweep("OSAS /users/new", "/users/new");
+  await sweep("OSAS /forms", "/forms");
+
+  const [sActivity, sReport, sDeadline, sUser] = await Promise.all([
+    prisma.activityProposal.findFirst({ select: { id: true, title: true } }),
+    prisma.accomplishmentReport.findFirst({ select: { id: true, title: true } }),
+    prisma.deadline.findFirst({ select: { id: true } }),
+    prisma.user.findFirst({ select: { id: true } }),
+  ]);
+
+  if (sActivity) {
+    const actPath = `/activities/${sActivity.id}`;
+    const { status: sa1, text: ta1 } = await fetchText(actPath, tokens.OSAS);
+    rec("OSAS activity detail 200", sa1 === 200, `${actPath} status=${sa1}`);
+    rec("OSAS activity detail not login", !ta1.includes(LOGIN_MARKER));
+    rec("OSAS activity detail shows title", ta1.includes(sActivity.title!));
+    await sweep("OSAS activity edit", `${actPath}/edit`, "Edit activity proposal");
+    await sweep("OSAS activity checkin", `${actPath}/checkin`, sActivity.title!);
+    const { status: sa2, text: ta2 } = await fetchText(`${actPath}/checkin?t=bad-token`, tokens.OSAS);
+    rec("OSAS checkin invalid token renders guard", sa2 === 200 && ta2.includes("Invalid QR code"), `status=${sa2}`);
+  } else {
+    rec("fixture: seeded activity exists", false, "no ActivityProposal rows — run `npm run db:seed`");
+  }
+
+  if (sReport) {
+    const repPath = `/reports/${sReport.id}`;
+    const { status: sr1, text: tr1 } = await fetchText(repPath, tokens.OSAS);
+    rec("OSAS report detail 200", sr1 === 200, `${repPath} status=${sr1}`);
+    rec("OSAS report detail not login", !tr1.includes(LOGIN_MARKER));
+    rec("OSAS report detail shows title", tr1.includes(sReport.title));
+    await sweep("OSAS report edit", `${repPath}/edit`, "Edit accomplishment report");
+  } else {
+    rec("fixture: seeded report exists", false, "no AccomplishmentReport rows — run `npm run db:seed`");
+  }
+
+  if (sDeadline) {
+    const { status: sd1, text: td1 } = await fetchText(`/deadlines/${sDeadline.id}/edit`, tokens.OSAS);
+    rec("OSAS deadline edit 200", sd1 === 200, `status=${sd1}`);
+    rec("OSAS deadline edit not login", !td1.includes(LOGIN_MARKER));
+  } else {
+    rec("fixture: seeded deadline exists", false, "no Deadline rows — run `npm run db:seed`");
+  }
+
+  if (sUser) {
+    await sweep("OSAS user edit", `/users/${sUser.id}/edit`);
+  } else {
+    rec("fixture: seeded user exists", false, "no User rows");
+  }
+
+  const orgPath = `/organizations/${sampleOrg.id}`;
+  const { status: so1, text: to1 } = await fetchText(orgPath, tokens.OSAS);
+  rec("OSAS org detail 200", so1 === 200, `${orgPath} status=${so1}`);
+  rec("OSAS org detail not login", !to1.includes(LOGIN_MARKER));
+  rec("OSAS org detail shows name", to1.includes(sampleOrg.name));
+  await sweep("OSAS org edit", `${orgPath}/edit`);
+  await sweep("OSAS org documents", `${orgPath}/documents`);
+
+  const sfQ = `?org=${sampleOrg.id}&ay=2026-2027`;
+  await sweep("OSAS sf-002 renewal", `/forms/sf-002${sfQ}`, "ORGANIZATION RENEWAL FORM");
+  await sweep("OSAS sf-003 adviser", `/forms/sf-003${sfQ}`, "ORGANIZATION ADVISER COMMITMENT FORM");
+  await sweep("OSAS sf-004 plan", `/forms/sf-004${sfQ}`, "Plan of Activities");
+  await sweep("OSAS sf-005 roster", `/forms/sf-005${sfQ}`, "LIST OF MEMBERS OF THE ORGANIZATION");
+  await sweep("OSAS sf-006 cert", `/forms/sf-006?org=${sampleOrg.id}`, "CERTIFICATION");
+
   const anon = await fetch(`${BASE}/analytics`, { redirect: "manual" });
   rec("anon /analytics redirected to login", anon.status === 307 || anon.status === 308, `status=${anon.status}`);
 

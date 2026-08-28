@@ -29,40 +29,54 @@ export default async function MonitoringPage() {
   const ay = await getSelectedAy();
   const now = new Date();
 
-  const orgsRaw = await db.organization.findMany({
-    where: scopedOrgWhere(user, { status: "ACTIVE" }),
-    select: {
-      id: true,
-      name: true,
-      acronym: true,
-      college: { select: { name: true } },
-      activities: {
-        where: { academicYear: ay },
-        orderBy: { startAt: "asc" },
-        select: {
-          id: true,
-          title: true,
-          status: true,
-          phase: true,
-          scope: true,
-          venue: true,
-          startAt: true,
-          endAt: true,
-          estimatedBudget: true,
-          expectedParticipants: true,
-          report: {
-            select: { status: true, actualParticipants: true, actualBudget: true },
-          },
-          _count: { select: { attendanceRecords: true } },
-        },
+  const [orgRows, activityRows] = await Promise.all([
+    db.organization.findMany({
+      where: scopedOrgWhere(user, { status: "ACTIVE" }),
+      select: {
+        id: true,
+        name: true,
+        acronym: true,
+        college: { select: { name: true } },
       },
-    },
-  });
+      orderBy: { name: "asc" },
+    }),
+    db.activityProposal.findMany({
+      where: {
+        academicYear: ay,
+        organization: { is: scopedOrgWhere(user, { status: "ACTIVE" }) },
+      },
+      orderBy: { startAt: "asc" },
+      select: {
+        id: true,
+        title: true,
+        status: true,
+        phase: true,
+        scope: true,
+        venue: true,
+        startAt: true,
+        endAt: true,
+        estimatedBudget: true,
+        expectedParticipants: true,
+        organizationId: true,
+        report: {
+          select: { status: true, actualParticipants: true, actualBudget: true },
+        },
+        _count: { select: { attendanceRecords: true } },
+      },
+    }),
+  ]);
 
-  const monitored: OrgMonitoring[] = orgsRaw.map((o) =>
+  const byOrg = new Map<string, typeof activityRows>();
+  for (const a of activityRows) {
+    const list = byOrg.get(a.organizationId);
+    if (list) list.push(a);
+    else byOrg.set(a.organizationId, [a]);
+  }
+
+  const monitored: OrgMonitoring[] = orgRows.map((o) =>
     monitorOrg(
       { id: o.id, name: o.name, acronym: o.acronym, collegeName: o.college?.name ?? null },
-      o.activities.map((a): MonitoredActivity => ({
+      (byOrg.get(o.id) ?? []).map((a): MonitoredActivity => ({
         id: a.id,
         title: a.title,
         status: a.status,

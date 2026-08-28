@@ -51,6 +51,13 @@
   --breakpoint-xs: 26rem;
 }
 
+/* Headings wrap gracefully at the paragraph level (no stray widows). */
+h1,
+h2,
+h3 {
+  text-wrap: balance;
+}
+
 body {
   background-color: var(--color-background);
   color: var(--color-content);

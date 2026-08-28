@@ -226,6 +226,7 @@ export default async function CalendarPage({
               <Link
                 key={v}
                 href={setView(v)}
+                aria-current={view === v ? "true" : undefined}
                 className={`px-3 py-2 text-xs font-bold uppercase tracking-wide capitalize ${
                   view === v ? "bg-primary text-white" : "text-content-secondary hover:bg-surface-secondary"
                 }`}
