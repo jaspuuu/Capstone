@@ -7,6 +7,12 @@ import path from "node:path";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient, RecognitionStatus } from "../src/generated/prisma/client";
 import { hashPassword } from "../src/lib/auth/password";
+import { formRoute, sfRouteEntityId } from "../src/lib/form-routes";
+import {
+  hashChainStep,
+  signatureContentHash,
+  signatureContentPayload,
+} from "../src/lib/signature-integrity";
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) throw new Error("DATABASE_URL is not set");
@@ -224,7 +230,10 @@ async function main() {
     acronym: string,
     data: { name: string; description?: string; type: "MOTHER" | "CHILD" | "INDEPENDENT"; parentId?: string; collegeId: string; departmentId?: string; foundedYear?: number },
   ) => {
-    const existing = await prisma.organization.findFirst({ where: { acronym }, select: { id: true } });
+    const existing = await prisma.organization.findFirst({
+      where: { acronym },
+      select: { id: true, name: true, acronym: true },
+    });
     if (existing) return existing;
     return prisma.organization.create({
       data: { acronym, applicationStatus: "RECOGNIZED", ...data },
@@ -553,6 +562,77 @@ async function main() {
         },
       });
       console.log(`M&E evaluation recorded for “${completedActivity.title}”.`);
+    }
+  }
+
+  // ------------------------------------------------------- Signature chain demo (SF-001)
+  // A fully signed SF-001 route so the smoke suite can assert the integrity
+  // badge renders "Signature chain verified" on the print form page. Hashes are
+  // computed with the real functions so verification matches the production path.
+  const sfFormKey = "SF001";
+  const sfEntityId = sfRouteEntityId(sfFormKey, ccsSbo.id, AY_CUR);
+  const existingSfRoute = await prisma.signatureRoute.findUnique({
+    where: { entityType_entityId: { entityType: "SF", entityId: sfEntityId } },
+    select: { id: true },
+  });
+  if (!existingSfRoute) {
+    const sfRoles = formRoute(sfFormKey);
+    if (sfRoles.length > 0) {
+      const sfTitle = "Application for Recognition/Renewal";
+      const sfSignedAtBase = new Date("2026-08-10T09:00:00+08:00");
+      const sfContentHash = signatureContentHash(
+        signatureContentPayload({
+          entityType: "SF",
+          entityId: sfEntityId,
+          formKey: sfFormKey,
+          title: sfTitle,
+          version: 1,
+          orgId: ccsSbo.id,
+          academicYear: AY_CUR,
+        })
+      );
+      const signers = [presidentAcs, secretaryJpia, adviserRegular, deanCcs];
+      let prevChainHash: string | null = null;
+      const sfSteps = sfRoles.map((role, i) => {
+        const signedAt = new Date(sfSignedAtBase.getTime() + i * 86_400_000);
+        const chainHash = hashChainStep({
+          role,
+          signerId: signers[i].id,
+          signedAt,
+          method: "TYPED",
+          contentHash: sfContentHash,
+          prevChainHash,
+        });
+        const step = {
+          order: i + 1,
+          role,
+          signerId: signers[i].id,
+          actedById: signers[i].id,
+          status: "SIGNED" as const,
+          signedAt,
+          signatureMethod: "TYPED",
+          contentHash: sfContentHash,
+          prevChainHash,
+          chainHash,
+        };
+        prevChainHash = chainHash;
+        return step;
+      });
+      await prisma.signatureRoute.create({
+        data: {
+          entityType: "SF",
+          entityId: sfEntityId,
+          formKey: sfFormKey,
+          title: sfTitle,
+          state: "COMPLETED",
+          version: 1,
+          createdById: osas.id,
+          steps: { create: sfSteps },
+        },
+      });
+      console.log(
+        `Signature chain demo created on SF-001 for ${ccsSbo.acronym ?? ccsSbo.name ?? "CCS-SBO"} · AY ${AY_CUR} (${sfRoles.length} signed steps).`
+      );
     }
   }
 

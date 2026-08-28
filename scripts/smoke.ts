@@ -169,6 +169,20 @@ async function main() {
     rec("fixture: seeded activity evaluation exists", false, "no ActivityEvaluation rows — run `npm run db:seed`");
   }
 
+  // ---- Signed SF-001 route (seeded demo) renders a verified chain -----------
+  const sfDemo = await prisma.signatureRoute.findFirst({
+    where: { entityType: "SF", formKey: "SF001", state: "COMPLETED" },
+    select: { entityId: true, steps: { where: { status: "SIGNED" }, select: { chainHash: true } } },
+  });
+  rec("fixture: SF-001 signature demo route exists", sfDemo != null, sfDemo ? `steps=${sfDemo.steps.length}` : "run `npm run db:seed`");
+  if (sfDemo) {
+    const [, orgId, ay] = sfDemo.entityId.split(":");
+    const { status: s9, text: t9 } = await fetchText(`/forms/sf-001?org=${orgId}&ay=${ay}`, tokens.OSAS);
+    const signedStepCount = sfDemo.steps.length;
+    const badgeVerified = t9.includes("Signature chain verified") || t9.includes(`\\"verified\\":${signedStepCount},\\"total\\":${signedStepCount}`);
+    rec("sf-001 shows verified signature chain badge", s9 === 200 && badgeVerified, `status=${s9} verified=${sfDemo.steps.length}/${sfDemo.steps.length}`);
+  }
+
   for (const c of checks) {
     console.log(`${c.ok ? "PASS" : "FAIL"}  ${c.label}${c.detail ? `  (${c.detail})` : ""}`);
   }

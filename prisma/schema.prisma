@@ -401,6 +401,7 @@ model ActivityProposal {
   @@index([organizationId])
   @@index([status])
   @@index([academicYear])
+  @@index([organizationId, academicYear])
 }
 
 // ---------------------------------------------------------------------------
@@ -508,6 +509,7 @@ model AccomplishmentReport {
   @@index([organizationId])
   @@index([status])
   @@index([academicYear])
+  @@index([organizationId, academicYear])
 }
 
 // ---------------------------------------------------------------------------
