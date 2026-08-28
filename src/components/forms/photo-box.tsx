@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useRef, useState } from "react";
 
 /**
@@ -12,11 +13,18 @@ export function PhotoBox({ label }: { label: string }) {
 
   return (
     <label
-      className="flex h-[24.3mm] w-[27.5mm] shrink- cursor-pointer items-center justify-center overflow-hidden border border-black text-center text-[9pt] leading-tight text-black"
+      className="flex h-[24.3mm] w-[27.5mm] shrink-0 cursor-pointer items-center justify-center overflow-hidden border border-black text-center text-[9pt] leading-tight text-black"
       title="Click to attach 1×1 photo"
     >
       {photo ? (
-        <img src={photo} alt="" className="h-full w-full object-cover" />
+        <Image
+          src={photo}
+          alt=""
+          width={200}
+          height={215}
+          unoptimized
+          className="h-full w-full object-cover"
+        />
       ) : (
         <>
           1 x 1

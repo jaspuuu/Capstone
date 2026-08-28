@@ -95,10 +95,7 @@ export async function saveSignature(
 }
 
 /** Clears the current user's saved signature entirely. */
-export async function removeSignature(
-  _prev: ActionState,
-  _formData: FormData
-): Promise<ActionState> {
+export async function removeSignature(): Promise<ActionState> {
   const session = await requireUser();
 
   const previous = await db.user.findUnique({

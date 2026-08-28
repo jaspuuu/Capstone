@@ -191,7 +191,6 @@ export default async function OrganizationsPage({
     return s ? `/organizations?${s}` : "/organizations";
   }
 
-  const canManage = can(user, "org.manage");
   const canCreate = can(user, "org.submit");
   const canExport = can(user, "analytics.view");
 

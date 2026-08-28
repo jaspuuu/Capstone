@@ -1,6 +1,7 @@
 "use client";
 
-import { useActionState, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useActionState, useEffect, useRef, useState, useTransition } from "react";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/form";
@@ -38,7 +39,10 @@ export function SignatureForm({
   defaultName: string;
 }) {
   const [saveState, saveAction] = useActionState(saveSignature, EMPTY);
-  const [removeState, removeAction] = useActionState(removeSignature, EMPTY);
+  const [removeMsg, setRemoveMsg] = useState<string | null>(null);
+  const [removeTone, setRemoveTone] = useState<"success" | "danger">("success");
+  const [removing, startRemove] = useTransition();
+  const router = useRouter();
   const [method, setMethod] = useState<Method>(
     current.method === "TYPE" || current.method === "UPLOAD" || current.method === "DRAW"
       ? current.method
@@ -166,15 +170,27 @@ export function SignatureForm({
   const typeReady = method === "TYPE" && typed.trim().length > 0;
   const ready = drawReady || uploadReady || typeReady;
 
+  function handleRemove(ev: React.FormEvent<HTMLFormElement>) {
+    ev.preventDefault();
+    startRemove(async () => {
+      const res = await removeSignature();
+      if (res.error) {
+        setRemoveTone("danger");
+        setRemoveMsg(res.error);
+      } else {
+        setRemoveTone("success");
+        setRemoveMsg(res.success ?? "Your signature has been removed.");
+        router.refresh();
+      }
+    });
+  }
+
   return (
     <div className="space-y-5">
-      {(saveState.error || removeState.error || saveState.success || removeState.success) && (
-        <Alert
-          tone={saveState.error ?? removeState.error ? "danger" : "success"}
-        >
-          {saveState.error ?? removeState.error ?? saveState.success ?? removeState.success}
-        </Alert>
+      {(saveState.error || saveState.success) && (
+        <Alert tone={saveState.error ? "danger" : "success"}>{saveState.error ?? saveState.success}</Alert>
       )}
+      {removeMsg && <Alert tone={removeTone}>{removeMsg}</Alert>}
 
       <div className="grid grid-cols-3 gap-2" role="tablist" aria-label="Signature input method">
         {(
@@ -292,8 +308,10 @@ export function SignatureForm({
       </form>
 
       {current.hasImage || current.typed ? (
-        <form action={removeAction}>
-          <SubmitButton variant="ghost">Remove saved signature</SubmitButton>
+        <form onSubmit={handleRemove}>
+          <SubmitButton variant="ghost" disabled={removing}>
+            {removing ? "Removing…" : "Remove saved signature"}
+          </SubmitButton>
         </form>
       ) : null}
     </div>

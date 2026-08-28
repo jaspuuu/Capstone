@@ -109,6 +109,14 @@ export function Shell({
 
   return (
     <div className="flex min-h-dvh">
+      {/* Skip link: keyboard/screen-reader users jump past the sidebar+header. */}
+      <a
+        href="#main-content"
+        className="fixed left-4 top-4 z-[100] -translate-y-24 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white shadow-lg focus-visible:translate-y-0"
+      >
+        Skip to content
+      </a>
+
       {/* Mobile overlay */}
       {mobileOpen && (
         <div
@@ -322,7 +330,11 @@ export function Shell({
         </header>
 
         {/* Content */}
-        <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:px-6 lg:px-8">
+        <main
+          id="main-content"
+          tabIndex={-1}
+          className="mx-auto w-full max-w-7xl scroll-mt-20 flex-1 px-4 py-6 outline-none sm:px-6 lg:px-8"
+        >
           {children}
         </main>
 

@@ -100,7 +100,7 @@ export function ProgressBar({
         aria-label={label}
         className="h-2 w-full overflow-hidden rounded-full bg-surface-secondary"
       >
-        <div className={cn("h-full rounded-full transition-all", tones[tone])} style={{ width: `${pct}%` }} />
+        <div className={cn("h-full rounded-full transition-[width]", tones[tone])} style={{ width: `${pct}%` }} />
       </div>
     </div>
   );

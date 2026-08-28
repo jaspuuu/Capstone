@@ -55,6 +55,21 @@ body {
   background-color: var(--color-background);
   color: var(--color-content);
   font-family: var(--font-sans);
+  /* No double-tap zoom delay when tapping controls on touch devices. */
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Honor reduced-motion: stop loops/skeletons for users who ask for it. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /* Visible focus states everywhere (§40) */

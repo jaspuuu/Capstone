@@ -112,6 +112,32 @@ async function main() {
   rec("OSAS export works after auth (no login body)", !t7.includes(LOGIN_MARKER));
   const exportBody = t7.replace(/^\uFEFF/, "");
   rec("OSAS export is CSV", exportBody.startsWith("Organization,"), `head=${exportBody.slice(0, 60).replace(/\n/g, "\\n")}`);
+  const exportLines = exportBody.split("\r\n").filter((l) => l.trim().length > 0);
+  const exportHeader = exportLines[0] ?? "";
+  rec("OSAS export has Budget actual column (loader fix)", exportHeader.includes("Budget actual") && exportHeader.includes("Utilization %"), `head=${exportHeader.slice(0, 80)}`);
+  const exportCcsRow = exportLines.find((l) => l.includes("CCS-SBO"));
+  rec("OSAS export budget actual populated for CCS-SBO", exportCcsRow != null && (exportCcsRow.split(",")[13] ?? "").trim().length > 0, exportCcsRow ? `cell=${exportCcsRow.split(",")[13]}` : "no row");
+  rec("OSAS export utilization % populated for CCS-SBO", exportCcsRow != null && /%\s*$/.test(exportCcsRow.split(",")[14] ?? ""), exportCcsRow ? `cell=${exportCcsRow.split(",")[14]}` : "no row");
+
+  const { status: s10, text: t10 } = await fetchText("/monitoring", tokens.OSAS);
+  rec("OSAS /monitoring 200", s10 === 200, `status=${s10}`);
+  rec("OSAS /monitoring not login", !t10.includes(LOGIN_MARKER));
+  rec("OSAS /monitoring shows pipeline", t10.includes("Per-organization pipeline") || t10.includes("Activity Monitoring"));
+
+  const { status: s11, text: t11 } = await fetchText(`/monitoring/report?org=${sampleOrg.id}&ay=2026-2027`, tokens.OSAS);
+  rec("OSAS monitoring report 200", s11 === 200, `status=${s11}`);
+  rec("OSAS monitoring report not login", !t11.includes(LOGIN_MARKER));
+  rec("OSAS monitoring report shows sheet", t11.includes("PLAN OF ACTIVITIES MONITORING REPORT"));
+
+  const sampleRec = await prisma.recognition.findFirst({ select: { id: true } });
+  if (sampleRec) {
+    const { status: s12, text: t12 } = await fetchText(`/recognition/${sampleRec.id}`, tokens.OSAS);
+    rec("OSAS recognition detail 200", s12 === 200, `status=${s12}`);
+    rec("OSAS recognition detail shows record", t12.includes("Application record") || t12.includes("History"));
+    rec("OSAS recognition detail not login", !t12.includes(LOGIN_MARKER));
+  } else {
+    rec("fixture: seeded recognition exists", false, "no Recognition rows — run `npm run db:seed`");
+  }
 
   const anon = await fetch(`${BASE}/analytics`, { redirect: "manual" });
   rec("anon /analytics redirected to login", anon.status === 307 || anon.status === 308, `status=${anon.status}`);
