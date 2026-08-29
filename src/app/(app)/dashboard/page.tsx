@@ -39,7 +39,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { StatCard } from "@/components/ui/stat-card";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
-import { PageHeader } from "@/components/ui/page-header";
+import { DashboardBriefing } from "@/components/dashboard-briefing";
 import { Timeline, type TimelineItem } from "@/components/ui/timeline";
 import { TableWrap, THead, TH, TR, TD } from "@/components/ui/table";
 export const instant = false;
@@ -213,9 +213,10 @@ async function AdminDashboard({
 
   return (
     <>
-      <PageHeader
+      <DashboardBriefing
         title={`${greeting()}, ${user.firstName}`}
-        description={`System overview for Academic Year ${ay}.`}
+        description="System overview across organizations, recognition, and review queues."
+        rubric={`Office briefing · AY ${ay}`}
       />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -461,9 +462,10 @@ async function DeanDashboard({ user, ay }: { user: { id: string; collegeId: stri
 
   return (
     <>
-      <PageHeader
+      <DashboardBriefing
         title={`${greeting()}, Dean ${user.firstName}`}
-        description={`Overview of student organizations under your college for AY ${ay}.`}
+        description="Overview of student organizations under your college for this academic year."
+        rubric={`College briefing · AY ${ay}`}
       />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -643,9 +645,10 @@ async function AdviserDashboard({ user, ay }: { user: { id: string; firstName: s
 
   return (
     <>
-      <PageHeader
+      <DashboardBriefing
         title={`${greeting()}, ${user.firstName}`}
         description="Organizations where you serve as faculty adviser."
+        rubric={`Adviser briefing · AY ${ay}`}
       />
 
       {pendingItems.length > 0 && (
@@ -762,9 +765,10 @@ async function OfficerDashboard({ user, ay }: { user: { id: string; firstName: s
 
   return (
     <>
-      <PageHeader
+      <DashboardBriefing
         title={`${greeting()}, ${user.firstName}`}
         description={isOfficer ? "Manage your organization's recognition and submissions." : "Your organization and participation."}
+        rubric={`Officer briefing · AY ${ay}`}
       />
 
       {memberships.length === 0 ? (

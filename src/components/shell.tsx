@@ -130,7 +130,7 @@ export function Shell({
       {/* Sidebar */}
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-50 flex flex-col bg-sidebar transition-[width,transform] duration-200 lg:sticky lg:top-0 lg:h-dvh lg:translate-x-0",
+          "fixed inset-y-0 left-0 z-50 flex flex-col bg-sidebar transition-[width,transform] duration-200 after:absolute after:inset-y-0 after:right-0 after:w-px after:bg-gradient-to-b after:from-gold after:via-gold/30 after:to-transparent after:content-[''] lg:sticky lg:top-0 lg:h-dvh lg:translate-x-0",
           collapsed ? "lg:w-[76px]" : "lg:w-64",
           "w-64",
           mobileOpen ? "translate-x-0" : "-translate-x-full"
@@ -224,7 +224,7 @@ export function Shell({
       {/* Main column */}
       <div className="flex min-w-0 flex-1 flex-col">
         {/* Topbar */}
-        <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-line bg-surface/90 px-4 backdrop-blur sm:px-6">
+        <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-line bg-surface/90 px-4 shadow-card backdrop-blur sm:px-6">
           <button
             type="button"
             className="rounded-lg p-2 text-content-secondary hover:bg-surface-secondary hover:text-content lg:hidden"
