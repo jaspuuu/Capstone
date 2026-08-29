@@ -1,6 +1,7 @@
 import QRCode from "qrcode";
 import { headers } from "next/headers";
-import { ClipboardCheck, QrCode, UserCheck } from "lucide-react";
+import Link from "next/link";
+import { ClipboardCheck, Printer, QrCode, UserCheck } from "lucide-react";
 import { db } from "@/lib/db";
 import { formatDateTime, fullName } from "@/lib/utils";
 import {
@@ -165,9 +166,18 @@ export async function AttendanceCard({
                     Ask members to scan this code at the venue.
                   </p>
                   {checkInUrl && (
-                    <p className="truncate rounded-md bg-surface-secondary px-2 py-1 font-mono text-[11px] text-content-secondary">
-                      {checkInUrl}
-                    </p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="truncate rounded-md bg-surface-secondary px-2 py-1 font-mono text-[11px] text-content-secondary">
+                        {checkInUrl}
+                      </p>
+                      <Link
+                        href={`/print/activities/${activity.id}`}
+                        className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline"
+                      >
+                        <Printer className="size-3.5" aria-hidden />
+                        Print poster
+                      </Link>
+                    </div>
                   )}
                   <QuickActionForm
                     action={endCheckIn}

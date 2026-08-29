@@ -18,6 +18,7 @@ import { formatDate, formatDateTime, fullName, timeUntil } from "@/lib/utils";
 import {
   AUDIT_ACTION_LABELS,
   DEADLINE_PROCESS_LABELS,
+  MEMBER_POSITION_LABELS,
   ORG_APPLICATION_STATUS_META,
   ORG_STATE_META,
   PROPOSAL_STATUS_META,
@@ -794,7 +795,7 @@ async function OfficerDashboard({ user, ay }: { user: { id: string; firstName: s
                 <CardHeader
                   icon={Landmark}
                   title={org.name}
-                  description={`${org.college.code} · ${SHORT_ROLE_LABELS[user.role as Role]} · AY ${ay}`}
+                  description={`${MEMBER_POSITION_LABELS[m.position] ?? SHORT_ROLE_LABELS[user.role as Role]} · ${org.college.code} · AY ${ay}`}
                   actions={
                     <Link
                       href={`/organizations/${org.id}`}
@@ -807,7 +808,14 @@ async function OfficerDashboard({ user, ay }: { user: { id: string; firstName: s
                 <CardContent className="grid grid-cols-1 gap-5 md:grid-cols-3">
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-wide text-content-secondary">Recognition state</p>
-                    <div className="mt-2"><Badge tone={ORG_STATE_META[state].tone}>{ORG_STATE_META[state].label}</Badge></div>
+                    <div className="mt-2">
+                      <Badge tone={ORG_STATE_META[state].tone}>{ORG_STATE_META[state].label}</Badge>
+                      <span className="ml-2">
+                        <Badge tone={m.position === "PRESIDENT" ? "primary" : m.position === "SECRETARY" ? "info" : "neutral"}>
+                          {MEMBER_POSITION_LABELS[m.position] ?? "Member"}
+                        </Badge>
+                      </span>
+                    </div>
                     {latestRec && (
                       <p className="mt-2 text-xs text-content-muted">
                         Latest record: AY {latestRec.academicYear} ·{" "}

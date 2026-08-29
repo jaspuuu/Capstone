@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Archive, FileUp, FileText, MessageSquare, Wallet } from "lucide-react";
+import { Archive, FileUp, FileText, MessageSquare, Printer, Wallet } from "lucide-react";
 import { requireUser } from "@/lib/auth/guards";
 import { can, orgScopeWhere } from "@/lib/auth/rbac";
 import { db } from "@/lib/db";
@@ -444,6 +444,18 @@ async function RequirementFiling({
           {sub.deadline && <span>deadline {formatDateTime(sub.deadline.dueDate)}</span>}
         </div>
       </div>
+
+      {(status === "APPROVED" || status === "ARCHIVED") && (
+        <div>
+          <Link
+            href={`/print/financial/${sub.id}`}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-line-strong px-3 py-1.5 text-xs font-semibold text-content hover:border-primary hover:text-primary"
+          >
+            <Printer className="size-3.5" aria-hidden />
+            Print record
+          </Link>
+        </div>
+      )}
 
       {status === "RETURNED" && route?.state === "RETURNED_FOR_REVISION" && (
         <Alert tone="warning" title="Returned for revision">

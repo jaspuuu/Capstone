@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Pencil } from "lucide-react";
+import { ArrowLeft, Pencil, Printer } from "lucide-react";
 import { requireUser } from "@/lib/auth/guards";
 import { can } from "@/lib/auth/rbac";
 import { db } from "@/lib/db";
@@ -202,6 +202,15 @@ export default async function ReportDetailPage({
               >
                 <Pencil className="size-4" aria-hidden />
                 Edit
+              </Link>
+            )}
+            {report.status === "ACCEPTED" && (
+              <Link
+                href={`/print/reports/${report.id}`}
+                className="inline-flex h-10 items-center gap-2 rounded-lg border border-line-strong px-4 text-sm font-semibold text-content hover:border-primary hover:text-primary"
+              >
+                <Printer className="size-4" aria-hidden />
+                Print record
               </Link>
             )}
             <Link

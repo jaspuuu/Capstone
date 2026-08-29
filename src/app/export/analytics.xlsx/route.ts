@@ -1,4 +1,4 @@
-import { auditExport, csvResponse, requireExporter, toCsv } from "@/lib/export";
+import { auditExport, requireExporter, xlsxSheetsResponse } from "@/lib/export";
 import { currentAcademicYear } from "@/lib/utils";
 import { ALERT_HEADERS, alertRows, buildAnalyticsExport } from "@/lib/analytics-export";
 
@@ -19,12 +19,10 @@ export async function GET(request: Request) {
     rec: toStr(sp.get("rec")) || undefined,
   });
 
-  const csv = toCsv(table.matrixHeaders, table.matrixRows);
+  await auditExport(user, `analytics-${ay}.xlsx`, table.orgCount);
 
-  const alertsCsv =
-    `\r\n"ALERTS & RECOMMENDATIONS (rule-based)"\r\n` +
-    toCsv(ALERT_HEADERS, alertRows(table.alerts));
-
-  await auditExport(user, `analytics-${ay}.csv`, table.orgCount);
-  return csvResponse(`analytics-${ay}.csv`, csv + alertsCsv);
+  return xlsxSheetsResponse(`analytics-${ay}.xlsx`, [
+    { name: "Compliance matrix", headers: table.matrixHeaders, rows: table.matrixRows },
+    { name: "Alerts", headers: ALERT_HEADERS, rows: alertRows(table.alerts) },
+  ]);
 }

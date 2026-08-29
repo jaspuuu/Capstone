@@ -71,6 +71,37 @@ export async function xlsxResponse(
   });
 }
 
+/** Multi-sheet workbook export (e.g. the analytics matrix + alerts). */
+export async function xlsxSheetsResponse(
+  filename: string,
+  sheets: { name: string; headers: string[]; rows: unknown[][] }[]
+): Promise<NextResponse> {
+  const workbook = new ExcelJS.Workbook();
+  for (const s of sheets) {
+    const sheet = workbook.addWorksheet(s.name);
+    sheet.addRow(s.headers);
+    sheet.getRow(1).font = { bold: true };
+    for (const row of s.rows) sheet.addRow(row);
+    sheet.columns.forEach((col) => {
+      let max = 10;
+      for (const cell of col.values ?? []) {
+        max = Math.min(60, Math.max(max, String(cell ?? "").length + 2));
+      }
+      col.width = max;
+    });
+  }
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  return new NextResponse(buffer as unknown as ArrayBuffer, {
+    headers: {
+      "Content-Type":
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "Content-Disposition": `attachment; filename="${filename}"`,
+      "Cache-Control": "no-store",
+    },
+  });
+}
+
 /** Resolves the exporting user or returns an error response. */
 export async function requireExporter(): Promise<
   { user: AuthUser; error: null } | { user: null; error: NextResponse }

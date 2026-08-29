@@ -113,15 +113,34 @@ export function HBar({
   );
 }
 
-/** CSV export link for the current filter set (respects the same scope). */
-export function ExportAnalyticsLink({ params, label = "Export CSV" }: { params: string; label?: string }) {
+/** CSV + Excel export links for the current filter set (respect the same scope). */
+export function ExportAnalyticsLink({
+  params,
+  label = "Export CSV",
+  showExcel = true,
+}: {
+  params: string;
+  label?: string;
+  showExcel?: boolean;
+}) {
   return (
-    <Link
-      href={`/export/analytics?${params}`}
-      className="inline-flex h-10 items-center gap-2 rounded-lg border border-line-strong bg-surface px-4 text-sm font-semibold text-content hover:border-primary hover:text-primary"
-    >
-      <Download className="size-4" aria-hidden />
-      {label}
-    </Link>
+    <div className="flex flex-wrap items-center gap-2">
+      <Link
+        href={`/export/analytics?${params}`}
+        className="inline-flex h-10 items-center gap-2 rounded-lg border border-line-strong bg-surface px-4 text-sm font-semibold text-content hover:border-primary hover:text-primary"
+      >
+        <Download className="size-4" aria-hidden />
+        {label}
+      </Link>
+      {showExcel && (
+        <Link
+          href={`/export/analytics.xlsx?${params}`}
+          className="inline-flex h-10 items-center gap-2 rounded-lg border border-line-strong bg-surface px-4 text-sm font-semibold text-content hover:border-primary hover:text-primary"
+        >
+          <Download className="size-4" aria-hidden />
+          Export Excel
+        </Link>
+      )}
+    </div>
   );
 }
