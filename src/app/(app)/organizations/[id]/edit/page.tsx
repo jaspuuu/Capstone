@@ -9,6 +9,7 @@ import { updateOrganization } from "@/lib/actions/organizations";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import { OrganizationForm } from "../../organization-form";
+export const instant = false;
 
 export const metadata: Metadata = { title: "Edit organization" };
 

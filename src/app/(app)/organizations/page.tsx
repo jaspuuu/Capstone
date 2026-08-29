@@ -15,6 +15,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/form";
 import { TableWrap, THead, TH, TR, TD } from "@/components/ui/table";
 import { ActionForm } from "@/components/action-form";
+export const instant = false;
 
 export const metadata: Metadata = { title: "Organizations" };
 

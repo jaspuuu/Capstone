@@ -11,6 +11,7 @@ import { updateReport } from "@/lib/actions/reports";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import { ReportForm } from "../../report-form";
+export const instant = false;
 
 export const metadata: Metadata = { title: "Edit accomplishment report" };
 

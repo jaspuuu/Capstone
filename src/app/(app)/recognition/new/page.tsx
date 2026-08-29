@@ -9,6 +9,7 @@ import { currentAcademicYear, nextAcademicYear } from "@/lib/utils";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import { RecognitionForm } from "../recognition-form";
+export const instant = false;
 
 export const metadata: Metadata = { title: "New recognition application" };
 

@@ -31,6 +31,7 @@ import {
   submitRecognition,
 } from "@/lib/actions/recognition";
 import type { ActionState } from "@/lib/actions/recognition";
+export const instant = false;
 
 export const metadata: Metadata = { title: "Application details" };
 

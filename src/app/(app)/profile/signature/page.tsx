@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import { Badge } from "@/components/ui/badge";
 import { SignatureForm } from "./signature-form";
+export const instant = false;
 
 export const metadata = { title: "My signature · ORGanIZE" };
 

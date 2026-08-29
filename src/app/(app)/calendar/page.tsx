@@ -7,6 +7,7 @@ import { db } from "@/lib/db";
 import { Card, CardContent } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import { Alert } from "@/components/ui/alert";
+export const instant = false;
 
 export const metadata: Metadata = { title: "Activity Calendar" };
 

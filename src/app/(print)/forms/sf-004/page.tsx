@@ -7,6 +7,7 @@ import { currentAcademicYear, formatMoney } from "@/lib/utils";
 import { PrintToolbar } from "@/components/forms/editable";
 import { Sf004Sheets, type Sf004Activity } from "@/components/forms/sf004-sheets";
 import { getApproversSignatures, getSignaturesFor } from "@/lib/signatures";
+export const instant = false;
 
 export const metadata: Metadata = { title: "SF-004 · Plan of Activities" };
 

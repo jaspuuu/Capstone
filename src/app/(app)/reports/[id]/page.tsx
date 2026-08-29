@@ -19,6 +19,7 @@ import { AttachmentsCard } from "@/components/attachments-card";
 import { canManageAttachments } from "@/lib/attachment-access";
 import { acceptReport, returnReport, submitReport } from "@/lib/actions/reports";
 import type { ActionState } from "@/lib/actions/reports";
+export const instant = false;
 
 export const metadata: Metadata = { title: "Accomplishment report" };
 

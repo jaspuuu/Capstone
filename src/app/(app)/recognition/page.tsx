@@ -13,6 +13,7 @@ import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { TableWrap, THead, TH, TR, TD } from "@/components/ui/table";
+export const instant = false;
 
 /** §22: documents submitted vs the seven SF-001 requirements. */
 function ProgressCell({

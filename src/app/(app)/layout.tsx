@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { NAV_SECTIONS } from "@/lib/nav";
 import { getSelectedAy } from "@/lib/ay-server";
 import { Shell } from "@/components/shell";
+export const instant = false;
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();

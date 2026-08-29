@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import { ChangePasswordForm } from "./change-password-form";
+export const instant = false;
 
 export const metadata: Metadata = { title: "My profile" };
 

@@ -9,6 +9,7 @@ import { formatDateTime, fullName } from "@/lib/utils";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import { ResetPasswordForm, UserForm } from "../../user-form";
+export const instant = false;
 
 export const metadata: Metadata = { title: "Edit user account" };
 

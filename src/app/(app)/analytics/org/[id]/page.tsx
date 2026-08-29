@@ -17,6 +17,7 @@ import { RECOGNITION_STATUS_META } from "@/lib/constants";
 import { deadlineAppliesLite } from "@/lib/analytics-ui";
 import { PageHeader } from "@/components/ui/page-header";
 import { OrgDrilldown } from "@/components/analytics/org-drilldown";
+export const instant = false;
 
 export const metadata: Metadata = { title: "Organization analytics" };
 

@@ -7,6 +7,7 @@ import { createUser } from "@/lib/actions/users";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import { UserForm } from "../user-form";
+export const instant = false;
 
 export const metadata: Metadata = { title: "New user account" };
 

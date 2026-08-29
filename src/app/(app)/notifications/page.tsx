@@ -9,6 +9,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { QuickActionForm } from "@/components/action-form";
+export const instant = false;
 
 export const metadata: Metadata = { title: "Notifications" };
 

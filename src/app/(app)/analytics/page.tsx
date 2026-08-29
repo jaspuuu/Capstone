@@ -41,6 +41,7 @@ import { ExportAnalyticsLink, NoData } from "@/components/analytics/analytics-pa
 import { AnalyticsFilters } from "@/components/analytics/analytics-filters";
 import { AnalyticsDashboard } from "@/components/analytics/dashboard";
 import type { MatrixRow, MatrixTone } from "@/components/analytics/matrix-table";
+export const instant = false;
 
 export const metadata: Metadata = { title: "Analytics" };
 

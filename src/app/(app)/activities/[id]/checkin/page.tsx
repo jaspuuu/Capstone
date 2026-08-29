@@ -10,6 +10,7 @@ import { selfCheckIn } from "@/lib/actions/attendance";
 import { Alert } from "@/components/ui/alert";
 import { Card, CardContent } from "@/components/ui/card";
 import { ActionForm } from "@/components/action-form";
+export const instant = false;
 
 export const metadata: Metadata = { title: "Check-in" };
 

@@ -5,6 +5,7 @@ import { Alert } from "@/components/ui/alert";
 import { getSessionUser } from "@/lib/auth/session";
 import { LoginForm } from "./login-form";
 import { Seal } from "@/components/ui/seal";
+export const instant = false;
 
 export const metadata: Metadata = { title: "Sign in" };
 

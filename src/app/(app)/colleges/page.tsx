@@ -10,6 +10,7 @@ import { Field, Input, Select } from "@/components/ui/form";
 import { PageHeader } from "@/components/ui/page-header";
 import { CollegeFields, InlineForm } from "./college-forms";
 import { createCollege, createDepartment, updateCollege } from "@/lib/actions/colleges";
+export const instant = false;
 
 export const metadata: Metadata = { title: "Colleges & departments" };
 

@@ -13,6 +13,7 @@ import {
 } from "@/components/forms/sf-chrome";
 import { FormOrgPicker } from "@/components/forms/org-picker";
 import { getApproversSignatures, getSignaturesFor } from "@/lib/signatures";
+export const instant = false;
 
 export const metadata: Metadata = { title: "SF-006 · Certification" };
 

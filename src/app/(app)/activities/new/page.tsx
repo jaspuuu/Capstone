@@ -7,6 +7,7 @@ import { createActivity } from "@/lib/actions/activities";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import { ActivityForm } from "../activity-form";
+export const instant = false;
 
 export const metadata: Metadata = { title: "New activity proposal" };
 

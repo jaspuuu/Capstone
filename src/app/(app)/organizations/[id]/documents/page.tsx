@@ -27,6 +27,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { TableWrap, THead, TH, TR, TD } from "@/components/ui/table";
 import { ActionForm, QuickActionForm } from "@/components/action-form";
 import { deleteAttachment, updateAttachmentKind, uploadAttachment } from "@/lib/actions/attachments";
+export const instant = false;
 
 export const metadata: Metadata = { title: "Document repository" };
 

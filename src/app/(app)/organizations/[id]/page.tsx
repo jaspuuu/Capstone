@@ -56,6 +56,7 @@ import {
   rejectOrgApplication,
 } from "@/lib/actions/organizations";
 import { MemberPicker } from "@/app/(app)/organizations/[id]/member-picker";
+export const instant = false;
 
 export const metadata: Metadata = { title: "Organization profile" };
 

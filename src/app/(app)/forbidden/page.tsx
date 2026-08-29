@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ShieldX } from "lucide-react";
 import { Card } from "@/components/ui/card";
+export const instant = false;
 
 export default function ForbiddenPage() {
   return (

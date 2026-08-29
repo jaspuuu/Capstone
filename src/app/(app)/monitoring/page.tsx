@@ -20,6 +20,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ProportionBar } from "@/components/ui/charts";
 import { TableWrap, THead, TH, TR, TD } from "@/components/ui/table";
+export const instant = false;
 
 export const metadata: Metadata = { title: "Activity Monitoring" };
 

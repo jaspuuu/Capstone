@@ -1,4 +1,5 @@
 import { cache } from "react";
+import { cacheLife } from "next/cache";
 import { db } from "@/lib/db";
 import { scopedOrgWhere } from "@/lib/auth/rbac";
 import type { AuthUser } from "@/lib/auth/session";
@@ -107,6 +108,10 @@ export async function buildAnalyticsSnapshot(
   user: AuthUser,
   filters: AnalyticsFilters
 ): Promise<AnalyticsSnapshot> {
+  "use cache";
+  // Cross-request: stale 5m, background revalidate 1m, hard expire 1h.
+  cacheLife("minutes");
+
   const { ay } = filters;
   const filterWhere = {
     ...(filters.org ? { id: filters.org } : {}),
@@ -320,5 +325,5 @@ export async function buildAnalyticsSnapshot(
   };
 }
 
-/** Memoize within a single Server Component render (no cross-request reuse). */
+/** Memoize within a single Server Component render; `use cache` adds cross-request reuse. */
 export const buildAnalyticsSnapshotMemo = cache(buildAnalyticsSnapshot);

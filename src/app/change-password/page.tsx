@@ -6,6 +6,7 @@ import { logout } from "@/lib/actions/auth";
 import { fullName } from "@/lib/utils";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { ChangePasswordForm } from "@/app/(app)/profile/change-password-form";
+export const instant = false;
 
 export const metadata: Metadata = { title: "Change password" };
 

@@ -10,6 +10,7 @@ import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { TableWrap, THead, TH, TR, TD } from "@/components/ui/table";
+export const instant = false;
 
 export const metadata: Metadata = { title: "Audit log" };
 

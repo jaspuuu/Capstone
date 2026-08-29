@@ -13,6 +13,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { TableWrap, THead, TH, TR, TD } from "@/components/ui/table";
 import { QuickActionForm } from "@/components/action-form";
 import { setUserActive } from "@/lib/actions/users";
+export const instant = false;
 
 export const metadata: Metadata = { title: "User accounts" };
 

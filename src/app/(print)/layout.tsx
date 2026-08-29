@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+export const instant = false;
 
 /**
  * Print-form route group: no app shell, just the paper. Session is enforced

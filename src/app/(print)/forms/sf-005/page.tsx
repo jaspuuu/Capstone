@@ -16,6 +16,7 @@ import {
 import { FormOrgPicker } from "@/components/forms/org-picker";
 import { SignatureRouteSection } from "@/components/forms/signature-route-section";
 import { getApproversSignatures, getSignaturesFor, type SignatureInfo } from "@/lib/signatures";
+export const instant = false;
 
 export const metadata: Metadata = { title: "SF-005 · List of Members of the Organization" };
 

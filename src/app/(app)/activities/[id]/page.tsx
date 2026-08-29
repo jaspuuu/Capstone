@@ -35,6 +35,7 @@ import {
   submitActivity,
 } from "@/lib/actions/activities";
 import type { ActionState } from "@/lib/actions/activities";
+export const instant = false;
 
 export const metadata: Metadata = { title: "Activity proposal" };
 

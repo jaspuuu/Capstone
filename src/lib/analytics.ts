@@ -941,12 +941,8 @@ function formatPHP(n: number): string {
 // M&E evaluation (rubric-based, entered by officers — never invented)
 // ---------------------------------------------------------------------------
 
-export const EVALUATION_DIMENSIONS = [
-  { key: "relevance", label: "Relevance" },
-  { key: "impact", label: "Impact" },
-  { key: "efficiency", label: "Efficiency" },
-  { key: "sustainability", label: "Sustainability" },
-] as const;
+import { EVALUATION_DIMENSIONS } from "@/lib/evaluation-dimensions";
+export { EVALUATION_DIMENSIONS };
 
 export type EvaluationStats = {
   count: number;

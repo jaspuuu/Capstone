@@ -4,18 +4,12 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth/guards";
 import { can, scopedOrgWhere } from "@/lib/auth/rbac";
+import { EVALUATION_DIMENSIONS } from "@/lib/evaluation-dimensions";
 
 // ---------------------------------------------------------------------------
 // M&E rubric evaluation. One explicit officer-entered evaluation per activity
 // on four 1-5 dimensions. The system never invents a rating.
 // ---------------------------------------------------------------------------
-
-export const EVALUATION_DIMENSIONS = [
-  { key: "relevance", label: "Relevance", help: "Alignment of the activity with the organization's objectives." },
-  { key: "impact", label: "Impact", help: "Observable results and benefit to participants." },
-  { key: "efficiency", label: "Efficiency", help: "Use of time, budget and resources." },
-  { key: "sustainability", label: "Sustainability", help: "Likelihood the gains continue after the activity." },
-] as const;
 
 export type EvaluationState = { error?: string; ok?: string };
 export type EvaluationInput = {

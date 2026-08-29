@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { FileText, Users, ClipboardList, Award, RefreshCw, ScrollText } from "lucide-react";
 import { requireUser } from "@/lib/auth/guards";
+export const instant = false;
 
 export const metadata: Metadata = { title: "Form Library" };
 

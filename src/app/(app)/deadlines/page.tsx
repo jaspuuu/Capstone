@@ -15,6 +15,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { TableWrap, THead, TH, TR, TD } from "@/components/ui/table";
 import { QuickActionForm } from "@/components/action-form";
 import { setDeadlineActive } from "@/lib/actions/deadlines";
+export const instant = false;
 
 export const metadata: Metadata = { title: "Deadlines" };
 

@@ -1,11 +1,8 @@
 "use client";
 
 import { useActionState } from "react";
-import {
-  EVALUATION_DIMENSIONS,
-  saveEvaluation,
-  type EvaluationState,
-} from "@/lib/actions/evaluations";
+import { EVALUATION_DIMENSIONS } from "@/lib/evaluation-dimensions";
+import { saveEvaluation, type EvaluationState } from "@/lib/actions/evaluations";
 
 const EMPTY: EvaluationState = {};
 

@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { ShieldCheck } from "lucide-react";
 import { getSessionUser } from "@/lib/auth/session";
 import { SignUpForm } from "./signup-form";
+export const instant = false;
 
 export const metadata: Metadata = { title: "Create account" };
 

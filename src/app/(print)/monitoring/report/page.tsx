@@ -12,6 +12,7 @@ import {
 } from "@/lib/monitoring";
 import { PrintToolbar } from "@/components/forms/editable";
 import { FormOrgPicker } from "@/components/forms/org-picker";
+export const instant = false;
 
 export const metadata: Metadata = { title: "Activity Monitoring Report" };
 
