@@ -35,7 +35,7 @@ export default async function OrgAnalyticsPage({
   const now = new Date();
 
   // Phase A: the org row and every relation as independent parallel queries.
-  const [core, memberRows, recognitionRows, reportRows, activityRows, deadlineRows] = await Promise.all([
+  const [core, memberRows, recognitionRows, reportRows, activityRows, deadlineRows, financialRows] = await Promise.all([
     db.organization.findFirst({
       where: scopedOrgWhere(user, { id }),
       select: {
@@ -82,6 +82,10 @@ export default async function OrgAnalyticsPage({
       where: { isActive: true },
       select: { id: true, name: true, process: true, academicYear: true, dueDate: true, scopeType: true, scopeCollegeId: true },
     }),
+    db.financialSubmission.findMany({
+      where: { organizationId: id },
+      select: { organizationId: true, academicYear: true, status: true },
+    }),
   ]);
   if (!core) notFound();
 
@@ -126,6 +130,7 @@ export default async function OrgAnalyticsPage({
     requirementFiles: recognitionRows.flatMap((r) =>
       (taggedByRec.get(r.id) ?? []).map((a) => ({ kind: a.kind as never, academicYear: r.academicYear, createdAt: a.createdAt }))
     ),
+    financialSubmissions: financialRows,
   };
 
   const rec = recognitionRows.find((r) => r.academicYear === ay) ?? null;

@@ -55,6 +55,8 @@ export type OrgSnapshot = {
   reports: { academicYear: string; status: ReportStatus }[];
   /** Tagged SF-001 checklist files on this org's recognitions, by AY. */
   requirementFiles: { kind: AttachmentKind; academicYear: string; createdAt: Date }[];
+  /** Part 12 financial compliance submissions (statuses as persisted by the module). */
+  financialSubmissions: { academicYear: string; status: string }[];
 };
 
 export type DeadlineLite = {
@@ -186,7 +188,7 @@ export type RequirementStatus =
  * attachments (accomplishment reports also count first-class reports).
  */
 export function requirementsChecklist(o: OrgSnapshot, ay: string): RequirementItem[] {
-  return checklistForYear(o.recognitions, o.requirementFiles, o.reports, ay);
+  return checklistForYear(o.recognitions, o.requirementFiles, o.reports, ay, o.financialSubmissions);
 }
 
 /**
@@ -194,12 +196,15 @@ export function requirementsChecklist(o: OrgSnapshot, ay: string): RequirementIt
  * renewal progress overview. The document's status follows the application
  * it is attached to: submitted docs are Under Review while the application
  * is being processed, Approved once it is recognized, Returned if it bounces.
+ * Financial submissions (Part 12) satisfy the FINANCIAL_REPORT requirement
+ * when present for the year.
  */
 export function checklistForYear(
   recognitions: { academicYear: string; status: string }[],
   requirementFiles: { academicYear: string; kind: string | null }[],
   reports: { academicYear: string; status: string }[],
-  ay: string
+  ay: string,
+  financialSubmissions?: { academicYear: string; status: string }[]
 ): RequirementItem[] {
   const letterMet = recognitions.some(
     (r) => r.academicYear === ay && FILED_RECOGNITION.includes(r.status as never)
@@ -226,6 +231,8 @@ export function checklistForYear(
       key === APPLICATION_LETTER_KEY
         ? letterMet
         : tagged.has(key) ||
+          (key === "FINANCIAL_REPORT" &&
+            (financialSubmissions?.some((s) => s.academicYear === ay && FILED_FINANCIAL.has(s.status)) ?? false)) ||
           (key === "ACCOMPLISHMENT_REPORTS" &&
             reports.some((r) => r.academicYear === ay && FILED_REPORT.includes(r.status as never)));
     return {
@@ -248,6 +255,9 @@ export function compliancePct(items: RequirementItem[]): number {
 export type FinancialStatus = "SUBMITTED" | "OVERDUE" | "PENDING";
 export type PlanStatus = "APPROVED" | "FILED" | "DRAFT_ONLY" | "MISSING";
 
+/** Part 12 states that count as a filed financial document for the 3-state badge. */
+const FILED_FINANCIAL = new Set(["SUBMITTED", "UNDER_REVIEW", "RETURNED", "RESUBMITTED", "APPROVED"]);
+
 export function financialCompliance(
   o: OrgSnapshot,
   ay: string,
@@ -255,7 +265,13 @@ export function financialCompliance(
   collegeId: string | null,
   now: Date = new Date()
 ): FinancialStatus {
-  if (o.requirementFiles.some((f) => f.academicYear === ay && f.kind === "FINANCIAL_REPORT")) {
+  // Part 12 submissions are the source of truth once present; the legacy
+  // tagged SF-001 FINANCIAL_REPORT attachment remains a fallback for years
+  // filed before the module existed.
+  if (
+    o.financialSubmissions.some((s) => s.academicYear === ay && FILED_FINANCIAL.has(s.status)) ||
+    o.requirementFiles.some((f) => f.academicYear === ay && f.kind === "FINANCIAL_REPORT")
+  ) {
     return "SUBMITTED";
   }
   // Overdue once any applicable accreditation deadline for the year has passed.

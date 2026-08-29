@@ -64,7 +64,7 @@ export default async function OrganizationDocumentsPage({
   });
   if (!org) notFound();
 
-  const [recognitions, reports, members] = await Promise.all([
+  const [recognitions, reports, members, financialSubmissions] = await Promise.all([
     db.recognition.findMany({
       where: { organizationId: org.id },
       select: { id: true, academicYear: true, status: true },
@@ -78,6 +78,10 @@ export default async function OrganizationDocumentsPage({
     db.organizationMember.findMany({
       where: { organizationId: org.id, isCurrent: true },
       select: { userId: true, position: true },
+    }),
+    db.financialSubmission.findMany({
+      where: { organizationId: org.id },
+      select: { academicYear: true, status: true },
     }),
   ]);
 
@@ -114,7 +118,8 @@ export default async function OrganizationDocumentsPage({
     recognitions,
     taggedFiles.map((a) => ({ academicYear: ay, kind: a.kind })),
     reports,
-    ay
+    ay,
+    financialSubmissions
   );
   const pct = compliancePct(items);
 

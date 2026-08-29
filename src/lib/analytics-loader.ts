@@ -72,6 +72,7 @@ export type AnalyticsOrg = {
     actualBudget: number | null;
   }[];
   requirementFiles: { kind: AttachmentKind; academicYear: string; createdAt: Date }[];
+  financialSubmissions: { academicYear: string; status: string }[];
 };
 
 /** AnalyticsOrg is a superset of OrgSnapshot, so analytics functions accept it as-is. */
@@ -121,7 +122,7 @@ export async function buildAnalyticsSnapshot(
   const scope = scopedOrgWhere(user, filterWhere);
 
   // Phase A: core org rows + every relation as an independent parallel query.
-  const [orgRows, memberRows, recognitionRows, reportRows, activityRows] = await Promise.all([
+  const [orgRows, memberRows, recognitionRows, reportRows, activityRows, financialSubmissionRows] = await Promise.all([
     db.organization.findMany({
       where: scope,
       select: {
@@ -175,6 +176,10 @@ export async function buildAnalyticsSnapshot(
         report: { select: { status: true, actualParticipants: true, actualBudget: true } },
       },
     }),
+    db.financialSubmission.findMany({
+      where: { organization: scope },
+      select: { organizationId: true, academicYear: true, status: true },
+    }),
   ]);
 
   const orgIds = orgRows.map((o) => o.id);
@@ -225,6 +230,12 @@ export async function buildAnalyticsSnapshot(
     });
     actsByOrg.set(a.organizationId, list);
   }
+  const financialByOrg = new Map<string, { academicYear: string; status: string }[]>();
+  for (const f of financialSubmissionRows) {
+    const list = financialByOrg.get(f.organizationId) ?? [];
+    list.push({ academicYear: f.academicYear, status: f.status });
+    financialByOrg.set(f.organizationId, list);
+  }
 
   const allOrgs: AnalyticsOrg[] = orgRows.map((o) => ({
     id: o.id,
@@ -239,6 +250,7 @@ export async function buildAnalyticsSnapshot(
     reports: reportsByOrg.get(o.id) ?? [],
     activities: (actsByOrg.get(o.id) ?? []).sort((a, b) => a.startAt.getTime() - b.startAt.getTime()),
     requirementFiles: [],
+    financialSubmissions: financialByOrg.get(o.id) ?? [],
   }));
 
   const collegeOpts = [

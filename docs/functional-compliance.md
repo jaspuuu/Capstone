@@ -48,6 +48,7 @@ Single source of truth for the workflow/state rules:
 | 30 | Audit trail | Done | `AuditLog` on every action + `RecognitionEvent` for per-step history |
 | 31 | Enter once, reuse everywhere | Done | Membership/attendance/forms/reports read user + organization relations; no re-entry |
 | 32 | Process tracker on every processing screen | Done | `WorkflowSteps` (org application, recognition, activity, report, SF signature routes) + current-action block |
+| P12 | Financial structure & financial compliance (`FinancialRequirement`/`FinancialSubmission`) | Done | Configurable per-process requirements (default signatory chain President → Secretary → Senior Adviser → Dean → SOA → OSAS or config-driven), one submission per org+AY+requirement, versioned attachments (`FINANCIAL_DOCUMENT`/`FINANCIAL_SUPPORTING`), routed through the same `SignatureRoute` as SF forms, one status taxonomy (DRAFT/INCOMPLETE/SUBMITTED/UNDER_REVIEW/RETURNED/RESUBMITTED/APPROVED/ARCHIVED) derived in `src/lib/financial.ts`, overdue derived from `Deadline`s (never stored), comments, archive (COMPLETED only). Serves as the analytics `Financial` source of truth (`analytics-loader` + `financialCompliance` in `analytics.ts`, 3-state badge Submitted/Overdue/Pending; the Part 12 submission also satisfies the SF-001 FINANCIAL_REPORT checklist item). Insert points: org workspace `/organizations/[id]/financial`, admin `/financial/requirements`, `/financial` compliance section, RBAC `financial.view`/`financial.manage` |
 
 ## Notes on registry adoption
 
