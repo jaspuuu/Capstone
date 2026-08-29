@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { Alert } from "@/components/ui/alert";
 import { getSessionUser } from "@/lib/auth/session";
 import { LoginForm } from "./login-form";
+import { Seal } from "@/components/ui/seal";
 
 export const metadata: Metadata = { title: "Sign in" };
 
@@ -74,9 +75,7 @@ export default async function LoginPage({
           className="absolute -bottom-40 -left-24 size-96 rounded-full bg-gold/15 blur-3xl"
         />
         <div className="relative flex items-center gap-3">
-          <span className="flex size-11 items-center justify-center rounded-xl bg-gold font-display text-base font-extrabold text-primary-dark">
-            OR
-          </span>
+          <Seal className="size-12 drop-shadow-[0_2px_6px_rgba(0,0,0,0.4)]" />
           <div>
             <p className="font-display text-lg font-bold tracking-tight">ORGanIZE</p>
             <p className="text-xs font-medium text-sidebar-text-muted">
@@ -105,9 +104,7 @@ export default async function LoginPage({
       <div className="flex items-center justify-center bg-surface/85 px-4 py-12 sm:px-8">
         <div className="w-full max-w-md">
           <div className="mb-8 flex items-center gap-3 lg:hidden">
-            <span className="flex size-10 items-center justify-center rounded-xl bg-primary font-display text-sm font-extrabold text-white">
-              OR
-            </span>
+            <Seal className="size-10" />
             <div>
               <p className="font-display text-base font-bold text-content">ORGanIZE</p>
               <p className="text-xs text-content-secondary">LSPU · OSAS</p>

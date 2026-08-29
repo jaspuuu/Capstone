@@ -11,6 +11,7 @@ import { YearPicker } from "@/components/year-picker";
 import { cn, initials } from "@/lib/utils";
 import { SHORT_ROLE_LABELS } from "@/lib/constants";
 import type { Role } from "@/generated/prisma/client";
+import { Seal } from "@/components/ui/seal";
 
 const NAV_ICONS: Record<NavIcon, React.ComponentType<{ className?: string }>> = {
   dashboard: LayoutDashboard,
@@ -138,9 +139,7 @@ export function Shell({
       >
         {/* Brand */}
         <div className="flex h-16 items-center gap-3 border-b border-white/10 px-4">
-          <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-gold font-display text-sm font-extrabold text-primary-dark">
-            OR
-          </span>
+          <Seal className="size-9 drop-shadow-[0_1px_2px_rgba(0,0,0,0.35)]" />
           {!collapsed && (
             <div className="min-w-0">
               <p className="font-display text-base font-bold tracking-tight text-sidebar-text">
@@ -183,10 +182,12 @@ export function Shell({
                         title={collapsed ? item.label : undefined}
                         onClick={closeOverlays}
                         className={cn(
-                          "group flex items-center gap-3 rounded-lg px-2.5 py-2.5 text-sm font-medium transition-colors",
+                          "group relative flex items-center gap-3 rounded-lg px-2.5 py-2.5 text-sm font-medium transition-colors",
                           active
                             ? "bg-sidebar-active text-white shadow-inner"
-                            : "text-sidebar-text-secondary hover:bg-sidebar-hover hover:text-white"
+                            : "text-sidebar-text-secondary hover:bg-sidebar-hover hover:text-white",
+                          active &&
+                            "before:absolute before:top-1/2 before:left-0 before:h-5 before:w-[3px] before:-translate-y-1/2 before:rounded-r-full before:bg-gold before:content-['']"
                         )}
                       >
                         <Icon

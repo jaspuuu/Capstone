@@ -49,14 +49,16 @@ export function StatCard({
         )}
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-2">
-        <p className="font-display text-3xl font-bold tracking-tight text-content">{value}</p>
+        <p className="font-display text-3xl font-bold tracking-tight tabular-nums text-content">{value}</p>
         {badge}
       </div>
       {hint && <p className="mt-1 text-xs text-content-muted">{hint}</p>}
     </>
   );
 
-  const classes = cn("p-5", href && "transition-shadow hover:shadow-pop", className);
+  const keyline =
+    iconTone === "gold" ? "border-t-2 border-t-gold" : "border-t-2 border-t-primary";
+  const classes = cn("overflow-hidden border-t-2 p-5", keyline, href && "transition-shadow hover:shadow-pop", className);
 
   if (href) {
     return (

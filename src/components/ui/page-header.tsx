@@ -38,11 +38,11 @@ export function PageHeader({
       )}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="font-display text-2xl font-bold tracking-tight text-content">
+          <h1 className="font-display text-[1.625rem] leading-tight font-bold tracking-tight text-content">
             {title}
           </h1>
           {description && (
-            <p className="mt-1 max-w-2xl text-sm text-content-secondary">{description}</p>
+            <p className="mt-1 max-w-2xl text-sm text-pretty text-content-secondary">{description}</p>
           )}
         </div>
         {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
