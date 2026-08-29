@@ -4,8 +4,8 @@ import { db } from "@/lib/db";
 import { scopedOrgWhere } from "@/lib/auth/rbac";
 import type { AuthUser } from "@/lib/auth/session";
 import type { DeadlineLite, OrgSnapshot } from "@/lib/analytics";
+import type { AttachmentKind } from "@/lib/attachments";
 import type {
-  AttachmentKind,
   ActivityScope,
   OrgType,
   RecognitionKind,

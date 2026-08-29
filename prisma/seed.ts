@@ -636,6 +636,188 @@ async function main() {
     }
   }
 
+  // ------------------------------------------------- Part 12: Financial compliance
+  const finRequirements = [
+    {
+      code: "ANNUAL_FIN_REPORT",
+      name: "Annual Financial Position Report",
+      description: "Fiscal-year-end financial position report signed by the officers and adviser before review.",
+      process: "RECOGNITION",
+    },
+    {
+      code: "ACTIVITY_LIQUIDATION",
+      name: "Activity Liquidation Report",
+      description: "Liquidation of an approved activity's funds? No — a liquidation report per funded activity cycle.",
+      process: "ACTIVITY",
+    },
+    {
+      code: "RENEWAL_FIN_DOCS",
+      name: "Renewal Financial Documents",
+      description: "Supporting financial documents required alongside the renewal application.",
+      process: "RENEWAL",
+    },
+  ] as const;
+  const finReqRows: Record<string, { id: string }> = {};
+  let financialRequirements = 0;
+  for (const r of finRequirements) {
+    const existing = await prisma.financialRequirement.findUnique({ where: { code: r.code } });
+    if (existing) {
+      finReqRows[r.code] = existing;
+    } else {
+      const created = await prisma.financialRequirement.create({
+        data: { code: r.code, name: r.name, description: r.description, process: r.process, createdById: osas.id },
+      });
+      finReqRows[r.code] = created;
+      financialRequirements += 1;
+    }
+  }
+  if (financialRequirements > 0) console.log(`Financial requirements seeded (${financialRequirements} new).`);
+
+  const demoFinSub = await prisma.financialSubmission.findUnique({
+    where: {
+      organizationId_academicYear_requirementId: {
+        organizationId: ccsSbo.id,
+        academicYear: AY_CUR,
+        requirementId: finReqRows["ANNUAL_FIN_REPORT"].id,
+      },
+    },
+  });
+  if (!demoFinSub) {
+    const ayDeadline = await prisma.deadline.findFirst({
+      where: { academicYear: AY_CUR, isActive: true },
+      orderBy: { dueDate: "asc" },
+      select: { id: true },
+    });
+    const submitted = await prisma.financialSubmission.create({
+      data: {
+        organizationId: ccsSbo.id,
+        requirementId: finReqRows["ANNUAL_FIN_REPORT"].id,
+        academicYear: AY_CUR,
+        status: "SUBMITTED",
+        version: 1,
+        submittedAt: new Date("2026-08-20T09:00:00+08:00"),
+        deadlineId: ayDeadline?.id ?? null,
+        createdById: presidentAcs.id,
+      },
+    });
+    await prisma.financialSubmission.create({
+      data: {
+        organizationId: graphicos.id,
+        requirementId: finReqRows["ANNUAL_FIN_REPORT"].id,
+        academicYear: AY_CUR,
+        status: "DRAFT",
+        version: 1,
+        createdById: secretaryJpia.id,
+      },
+    });
+
+    const finTitle = "Annual Financial Position Report";
+    const finContentHash = signatureContentHash(
+      signatureContentPayload({
+        entityType: "FinancialSubmission",
+        entityId: submitted.id,
+        formKey: "ANNUAL_FIN_REPORT",
+        title: finTitle,
+        version: 1,
+        orgId: ccsSbo.id,
+        academicYear: AY_CUR,
+      })
+    );
+    const finSigners = [presidentAcs, secretaryJpia, adviserRegular, deanCcs, soa, osas];
+    // Mirrors DEFAULT_FINANCIAL_SIGNERS in src/lib/financial.ts (kept local: seed can't import server-only guards).
+    const finRoles: {
+      role: "PRESIDENT" | "SECRETARY" | "SENIOR_ADVISER" | "DEAN" | "SOA" | "OSAS";
+      status: "SIGNED" | "LOCKED" | "CURRENT";
+      signerId?: string;
+      signedAt?: Date;
+      chainHash?: string;
+      prevChainHash?: string | null;
+    }[] = [];
+    let finPrev: string | null = null;
+    const finBase = new Date("2026-08-20T09:00:00+08:00");
+    const finRoleOrder = ["PRESIDENT", "SECRETARY", "SENIOR_ADVISER", "DEAN", "SOA", "OSAS"] as const;
+    for (let i = 0; i < finSigners.length; i += 1) {
+      const role = finRoleOrder[i];
+      const signed = i < 2; // President + Secretary signed; rest locked.
+      const step: (typeof finRoles)[number] = signed
+        ? {
+            role,
+            status: "SIGNED",
+            signerId: finSigners[i].id,
+            signedAt: new Date(finBase.getTime() + i * 24 * 3_600_000),
+          }
+        : { role, status: i === 2 ? "CURRENT" : "LOCKED" };
+      if (signed) {
+        step.chainHash = hashChainStep({
+          role,
+          signerId: step.signerId!,
+          signedAt: step.signedAt!,
+          method: "TYPED",
+          contentHash: finContentHash,
+          prevChainHash: finPrev,
+        });
+        step.prevChainHash = finPrev;
+        finPrev = step.chainHash;
+      }
+      finRoles.push(step);
+    }
+    await prisma.signatureRoute.create({
+      data: {
+        entityType: "FinancialSubmission",
+        entityId: submitted.id,
+        formKey: "ANNUAL_FIN_REPORT",
+        title: finTitle,
+        state: "IN_PROGRESS",
+        version: 1,
+        createdById: presidentAcs.id,
+        steps: {
+          create: finRoles.map((s, i) => ({
+            order: i + 1,
+            role: s.role,
+            signerId: s.signerId ?? null,
+            actedById: s.signerId ?? null,
+            status: s.status,
+            signedAt: s.signedAt ?? null,
+            signatureMethod: "TYPED",
+            contentHash: s.signedAt ? finContentHash : null,
+            prevChainHash: s.prevChainHash ?? null,
+            chainHash: s.chainHash ?? null,
+          })),
+        },
+      },
+    });
+
+    const png = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+      "base64"
+    );
+    const dir = path.join(process.cwd(), "storage", "uploads");
+    await mkdir(dir, { recursive: true });
+    for (const [kind, fileName] of [
+      ["FINANCIAL_DOCUMENT", "ccs-sbo-annual-financial-report.png"],
+      ["FINANCIAL_SUPPORTING", "ccs-sbo-bank-statement.png"],
+    ] as const) {
+      const storedName = `${randomBytes(24).toString("hex")}.png`;
+      await writeFile(path.join(dir, storedName), png);
+      await prisma.attachment.create({
+        data: {
+          entityType: "FinancialSubmission",
+          entityId: submitted.id,
+          fileName,
+          storedName,
+          mimeType: "image/png",
+          sizeBytes: png.length,
+          kind,
+          version: 1,
+          uploadedById: presidentAcs.id,
+        },
+      });
+    }
+    console.log(
+      `Part 12 demo: ${ccsSbo.acronym ?? ccsSbo.name} — Annual Financial Position Report SUBMITTED (awaiting adviser +), Graphicos DRAFT.`
+    );
+  }
+
   // ------------------------------------------------------- Attachments
   const attachmentCount = await prisma.attachment.count();
   if (attachmentCount === 0) {

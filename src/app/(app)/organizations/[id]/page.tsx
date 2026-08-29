@@ -14,6 +14,7 @@ import {
   RefreshCw,
   UserPlus,
   Users,
+  Wallet,
 } from "lucide-react";
 import { requireUser } from "@/lib/auth/guards";
 import { can, orgScopeWhere } from "@/lib/auth/rbac";
@@ -245,6 +246,13 @@ export default async function OrganizationDetailPage({
           >
             <FileStack className="size-4" aria-hidden />
             Documents
+          </Link>
+          <Link
+            href={`/organizations/${org.id}/financial`}
+            className="inline-flex h-10 items-center gap-2 rounded-lg border border-line-strong bg-surface px-4 text-sm font-semibold text-content hover:border-primary"
+          >
+            <Wallet className="size-4" aria-hidden />
+            Financial
           </Link>
           <a
             href={`/forms/sf-004?org=${org.id}`}

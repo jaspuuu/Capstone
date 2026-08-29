@@ -76,6 +76,11 @@ model User {
   createdSignatureRoutes SignatureRoute[]       @relation("SignatureRouteCreator")
   signatureSteps         SignatureStep[]        @relation("SignatureStepSigner")
   actedSignatureSteps    SignatureStep[]        @relation("SignatureStepActor")
+  createdFinancialRequirements FinancialRequirement[] @relation("FinancialRequirementCreator")
+  createdFinancialSubmissions  FinancialSubmission[]  @relation("FinancialSubmissionCreator")
+  decidedFinancialSubmissions  FinancialSubmission[]  @relation("FinancialSubmissionDecidedBy")
+  archivedFinancialSubmissions FinancialSubmission[]  @relation("FinancialSubmissionArchiver")
+  financialComments            FinancialComment[]     @relation("FinancialCommentAuthor")
 
   @@index([role])
   @@index([collegeId])
@@ -217,6 +222,7 @@ model Organization {
   recognitions Recognition[]
   activities   ActivityProposal[]
   reports      AccomplishmentReport[]
+  financialSubmissions FinancialSubmission[]
 
   @@index([collegeId])
   @@index([type])
@@ -630,6 +636,8 @@ model Deadline {
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
 
+  financialSubmissions FinancialSubmission[]
+
   @@index([academicYear])
   @@index([process])
 }
@@ -648,11 +656,38 @@ enum AttachmentKind {
   ADVISER_COMMITMENT
   CERTIFICATION
   FINANCIAL_REPORT
+  // Financial-module file roles (tagged on FinancialSubmission attachments).
+  FINANCIAL_DOCUMENT
+  FINANCIAL_SUPPORTING
+}
+
+// The institutional process a financial requirement belongs to. Maps onto the
+// existing Deadline.process values so deadlines drive overdue determination.
+enum FinancialProcess {
+  RECOGNITION
+  RENEWAL
+  ACTIVITY
+  OTHER
+}
+
+// Single consistent financial workflow taxonomy (§13). Overdue is a derived
+// flag (an applicable deadline passed without a filed/settled submission),
+// not a stored status.
+enum FinancialSubmissionStatus {
+  DRAFT
+  INCOMPLETE
+  SUBMITTED
+  UNDER_REVIEW
+  RETURNED
+  RESUBMITTED
+  APPROVED
+  ARCHIVED
 }
 
 model Attachment {
   id           String          @id @default(cuid())
   // Parent record: "Recognition" | "ActivityProposal" | "AccomplishmentReport"
+  // | "FinancialSubmission"
   entityType   String
   entityId     String
   fileName     String
@@ -660,6 +695,9 @@ model Attachment {
   mimeType     String
   sizeBytes    Int
   kind         AttachmentKind?
+  // Submission revision this file belongs to (financial files only; others
+  // stay at the default 1 so history is never rewritten).
+  version      Int             @default(1)
   uploadedById String
   uploadedBy   User            @relation("AttachmentUploader", fields: [uploadedById], references: [id])
   createdAt    DateTime        @default(now())
@@ -707,4 +745,75 @@ model AuditLog {
   @@index([createdAt])
   @@index([entityType, entityId])
   @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
+// Financial compliance module (Part 12 - document/process compliance, NOT an
+// accounting system). A FinancialRequirement is a configurable document a
+// process requires; a FinancialSubmission is one org's instance for an
+// academic year, routed through the same signature chain as the printed SF
+// forms. Status transitions are enforced in src/lib/financial.ts.
+// ---------------------------------------------------------------------------
+
+model FinancialRequirement {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  name        String
+  description String?
+  process     FinancialProcess        @default(RECOGNITION)
+  // Signatory chain for this requirement; empty = canonical default.
+  signers     SignatoryRole[]
+  isActive    Boolean  @default(true)
+  createdById String
+  createdBy   User     @relation("FinancialRequirementCreator", fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  submissions FinancialSubmission[]
+
+  @@index([process, isActive])
+}
+
+model FinancialSubmission {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  requirementId  String
+  requirement    FinancialRequirement @relation(fields: [requirementId], references: [id], onDelete: Cascade)
+  academicYear   String
+  status         FinancialSubmissionStatus @default(DRAFT)
+  // Mirrors SignatureRoute.version (increments on each reviewer return).
+  version        Int      @default(1)
+  deadlineId     String?
+  deadline       Deadline? @relation(fields: [deadlineId], references: [id])
+  submittedAt    DateTime?
+  resubmittedAt  DateTime?
+  decidedAt      DateTime?
+  decidedById    String?
+  decidedBy      User?    @relation("FinancialSubmissionDecidedBy", fields: [decidedById], references: [id])
+  archivedAt     DateTime?
+  archivedById   String?
+  archivedBy     User?    @relation("FinancialSubmissionArchiver", fields: [archivedById], references: [id])
+  createdById    String
+  createdBy      User     @relation("FinancialSubmissionCreator", fields: [createdById], references: [id])
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  comments FinancialComment[]
+
+  @@unique([organizationId, academicYear, requirementId])
+  @@index([organizationId, academicYear])
+  @@index([status])
+}
+
+model FinancialComment {
+  id           String   @id @default(cuid())
+  submissionId String
+  submission   FinancialSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  authorId     String
+  author       User     @relation("FinancialCommentAuthor", fields: [authorId], references: [id])
+  body         String
+  createdAt    DateTime @default(now())
+
+  @@index([submissionId])
 }

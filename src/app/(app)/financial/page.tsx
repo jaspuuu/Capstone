@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { AlertTriangle, Banknote, FileCheck, Percent, Wallet } from "lucide-react";
+import { AlertTriangle, Banknote, FileCheck, Percent, Settings2, Wallet } from "lucide-react";
 import { requirePermission } from "@/lib/auth/guards";
+import { can } from "@/lib/auth/rbac";
 import { currentAcademicYear, formatMoney } from "@/lib/utils";
 import { RECOGNITION_STATUS_META } from "@/lib/constants";
 import {
@@ -15,6 +16,7 @@ import {
 import { FIN_META } from "@/lib/analytics-ui";
 import { monitorOrg } from "@/lib/monitoring";
 import { buildAnalyticsSnapshotMemo } from "@/lib/analytics-loader";
+import { FINANCIAL_STATUS_META, buildFinancialComplianceMemo } from "@/lib/financial";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { StatCard } from "@/components/ui/stat-card";
@@ -105,6 +107,33 @@ export default async function FinancialPage({
     ...budgetAlerts(monitored).filter((a) => a.orgId && orgsScoped.some((o) => o.id === a.orgId)),
   ].sort((a, b) => PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority]);
 
+  // ---- Part 12: document/process compliance, one consistent status flow.
+  const compliance = await buildFinancialComplianceMemo(user, ay);
+  const compOrgs = compliance.orgs.filter((o) =>
+    (!toStr(sp.org) || o.id === toStr(sp.org)) &&
+    (!toStr(sp.type) || o.type === toStr(sp.type)) &&
+    (!toStr(sp.college) || o.collegeName === toStr(sp.college))
+  );
+
+  const ATTENTION_STATES = new Set(["OVERDUE", "UNSUBMITTED", "DRAFT", "INCOMPLETE", "RETURNED"]);
+  const attention: { orgId: string; orgName: string; orgAcronym: string | null; reqCode: string; reqName: string; status: string }[] = [];
+  const totals: Record<string, number> = {};
+  for (const org of compOrgs) {
+    const row = compliance.cells.get(org.id);
+    if (!row) continue;
+    for (const req of compliance.requirements) {
+      const cell = row.get(req.id);
+      if (!cell) continue;
+      totals[cell.status] = (totals[cell.status] ?? 0) + 1;
+      if (ATTENTION_STATES.has(cell.status)) {
+        attention.push({ orgId: org.id, orgName: org.name, orgAcronym: org.acronym, reqCode: req.code, reqName: req.name, status: cell.status });
+      }
+    }
+  }
+  attention.sort((a, b) => Number(b.status === "OVERDUE") - Number(a.status === "OVERDUE"));
+  const N = (s: string) => totals[s] ?? 0;
+  const canConfigure = can(user, "financial.manage");
+
   const rows = monitored
     .map((o) => ({
       id: o.id,
@@ -132,6 +161,93 @@ export default async function FinancialPage({
         description={`Budget plans, expenditure, and accreditation financial compliance · AY ${ay}`}
         breadcrumb={[{ label: "Financial" }]}
       />
+
+      {canConfigure && (
+        <div className="mb-6 flex justify-end">
+          <Link
+            href="/financial/requirements"
+            className="inline-flex h-9 items-center gap-2 rounded-lg border border-line-strong bg-surface px-4 text-sm font-semibold text-content hover:border-primary"
+          >
+            <Settings2 className="size-4" aria-hidden />
+            Configure requirements
+          </Link>
+        </div>
+      )}
+
+      {/* Part 12: submission-status compliance */}
+      <Card className="mb-6">
+        <CardHeader
+          title="Financial document compliance"
+          description={`Filing status across configured requirements · ${compOrgs.length} organizations in scope`}
+        />
+        <CardContent className="space-y-5">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
+            {(
+              [
+                ["Submitted", "SUBMITTED", "text-blue-600"],
+                ["Under review", "UNDER_REVIEW", "text-blue-600"],
+                ["Returned", "RETURNED", "text-red-600"],
+                ["Approved", "APPROVED", "text-emerald-600"],
+                ["Overdue", "OVERDUE", "text-red-600"],
+                ["Not filed", "UNSUBMITTED", "text-content-muted"],
+              ] as const
+            ).map(([label, key, cls]) => (
+              <div key={key} className="rounded-xl border border-line bg-background p-3 text-center">
+                <p className={`font-display text-2xl font-bold ${cls}`}>{N(key)}</p>
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-content-muted">{label}</p>
+              </div>
+            ))}
+          </div>
+
+          {attention.length > 0 ? (
+            <TableWrap>
+              <THead>
+                <TH>Organization</TH>
+                <TH>Requirement</TH>
+                <TH>Status</TH>
+                <TH></TH>
+              </THead>
+              <tbody>
+                {attention.map((a, i) => (
+                  <TR key={`${a.orgId}-${a.reqCode}-${i}`}>
+                    <TD>
+                      <Link href={`/organizations/${a.orgId}/financial`} className="font-semibold text-content hover:text-primary">
+                        {a.orgAcronym ?? a.orgName}
+                      </Link>
+                      <span className="block text-[11px] text-content-secondary">{a.orgName}</span>
+                    </TD>
+                    <TD>
+                      <span className="text-sm text-content">{a.reqName}</span>
+                      <span className="ml-1.5 text-[11px] text-content-muted">{a.reqCode}</span>
+                    </TD>
+                    <TD>
+                      <Badge tone={FINANCIAL_STATUS_META[a.status]?.tone ?? "neutral"}>
+                        {FINANCIAL_STATUS_META[a.status]?.label ?? a.status}
+                      </Badge>
+                    </TD>
+                    <TD className="text-right">
+                      {a.status === "OVERDUE" || a.status === "UNSUBMITTED" || a.status === "DRAFT" || a.status === "INCOMPLETE" ? (
+                        <Link href={`/organizations/${a.orgId}/financial`} className="text-xs font-semibold text-primary hover:underline">
+                          File now →
+                        </Link>
+                      ) : (
+                        <Link href={`/organizations/${a.orgId}/financial`} className="text-xs font-semibold text-primary hover:underline">
+                          Review →
+                        </Link>
+                      )}
+                    </TD>
+                  </TR>
+                ))}
+              </tbody>
+            </TableWrap>
+          ) : (
+            <p className="text-sm text-content-muted">
+              All organizations in scope are filed up to date. Requirement statuses refresh as documents are
+              signed, returned, resubmitted, or archived.
+            </p>
+          )}
+        </CardContent>
+      </Card>
 
       <AnalyticsFilters
         options={{

@@ -14,6 +14,7 @@ import {
   signatureContentHash,
   signatureContentPayload,
 } from "@/lib/signature-integrity";
+import { syncFinancialSubmission } from "@/lib/actions/financial";
 
 // ---------------------------------------------------------------------------
 // Signing actions (§10 explicit confirmation, §11 audit trail, §28 backend
@@ -23,7 +24,21 @@ import {
 
 export type RouteActionState = { error?: string; ok?: string };
 
-async function orgContextFor(entityId: string) {
+async function orgContextFor(entityType: string, entityId: string) {
+  if (entityType === "FinancialSubmission") {
+    // entityId = FinancialSubmission row id.
+    const sub = await db.financialSubmission.findUnique({
+      where: { id: entityId },
+      select: { organizationId: true, academicYear: true },
+    });
+    if (!sub) throw new Error("Financial submission not found.");
+    const org = await db.organization.findUnique({
+      where: { id: sub.organizationId },
+      select: { id: true, collegeId: true },
+    });
+    if (!org) throw new Error("Organization not found.");
+    return { ...org, academicYear: sub.academicYear };
+  }
   // entityId = `${formKey}:${orgId}:${ay}`
   const [, orgId, ay] = entityId.split(":");
   const org = await db.organization.findUnique({
@@ -51,7 +66,7 @@ const route = await db.signatureRoute.findUnique({
     });
     if (!route) return { error: "Routing record not found." };
 
-    const org = await orgContextFor(route.entityId);
+    const org = await orgContextFor(route.entityType, route.entityId);
     const { step } = await authorizeCurrentSigner({
       entityType: route.entityType,
       entityId: route.entityId,
@@ -127,13 +142,14 @@ await tx.signatureStep.update({
           },
         });
       } else {
-        await tx.signatureRoute.update({
+await tx.signatureRoute.update({
           where: { id: route.id },
           data: { state: "COMPLETED" },
         });
       }
     });
 
+    await syncFinancialSubmission({ entityType: route.entityType, entityId: route.entityId });
     revalidatePath(`/forms/${route.formKey.toLowerCase()}`);
     return { ok: "Signature attached and forwarded." };
   } catch (e) {
@@ -156,7 +172,7 @@ export async function returnCurrentStep(
     });
     if (!route) return { error: "Routing record not found." };
 
-    const org = await orgContextFor(route.entityId);
+const org = await orgContextFor(route.entityType, route.entityId);
     const { step } = await authorizeCurrentSigner({
       entityType: route.entityType,
       entityId: route.entityId,
@@ -182,13 +198,14 @@ export async function returnCurrentStep(
         where: { routeId: route.id, order: 1 },
       });
       if (first) {
-        await tx.signatureStep.update({
+await tx.signatureStep.update({
           where: { id: first.id },
           data: { status: "CURRENT" },
         });
       }
     });
 
+    await syncFinancialSubmission({ entityType: route.entityType, entityId: route.entityId });
     revalidatePath(`/forms/${route.formKey.toLowerCase()}`);
     return { ok: "Document returned for revision." };
   } catch (e) {
@@ -210,7 +227,7 @@ export async function resubmitRoute(
     });
     if (!route) return { error: "Routing record not found." };
 
-    const org = await orgContextFor(route.entityId);
+const org = await orgContextFor(route.entityType, route.entityId);
     const first = route.steps[0];
     const eligible = await resolveSigners(first.role, org);
     if (!eligible.includes(user.id)) {
@@ -220,43 +237,53 @@ export async function resubmitRoute(
       return { error: "This document is not awaiting revision." };
     }
 
-    await db.$transaction(async (tx) => {
-      await tx.signatureRoute.update({
-        where: { id: route.id },
-        data: { state: "IN_PROGRESS" },
-      });
-// Fresh start: clear every step (version was already bumped on return).
-      await tx.signatureStep.updateMany({
-        where: { routeId: route.id },
-        data: {
-          status: "LOCKED",
-          signedAt: null,
-          signatureImage: null,
-          signatureTyped: null,
-          signatureMethod: null,
-          comment: null,
-          actedById: null,
-          contentHash: null,
-          prevChainHash: null,
-          chainHash: null,
-        },
-      });
-      const newFirst = await tx.signatureStep.findFirst({
-        where: { routeId: route.id, order: 1 },
-      });
-      if (newFirst) {
-        await tx.signatureStep.update({
-          where: { id: newFirst.id },
-          data: { status: "CURRENT" },
-        });
-      }
-    });
+    await resetRouteForResubmit(route.id);
 
+    await syncFinancialSubmission({ entityType: route.entityType, entityId: route.entityId });
     revalidatePath(`/forms/${route.formKey.toLowerCase()}`);
     return { ok: "Document resubmitted for signatures." };
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Resubmit failed." };
   }
+}
+
+/**
+ * Shared reset for the originator after a return: marks the flow IN_PROGRESS
+ * and clears every step so signers re-verify the revised document. Shared by
+ * printed forms and the financial compliance module.
+ */
+export async function resetRouteForResubmit(routeId: string) {
+  await db.$transaction(async (tx) => {
+    await tx.signatureRoute.update({
+      where: { id: routeId },
+      data: { state: "IN_PROGRESS" },
+    });
+    // Fresh start: clear every step (version was already bumped on return).
+    await tx.signatureStep.updateMany({
+      where: { routeId },
+      data: {
+        status: "LOCKED",
+        signedAt: null,
+        signatureImage: null,
+        signatureTyped: null,
+        signatureMethod: null,
+        comment: null,
+        actedById: null,
+        contentHash: null,
+        prevChainHash: null,
+        chainHash: null,
+      },
+    });
+    const newFirst = await tx.signatureStep.findFirst({
+      where: { routeId, order: 1 },
+    });
+    if (newFirst) {
+      await tx.signatureStep.update({
+        where: { id: newFirst.id },
+        data: { status: "CURRENT" },
+      });
+    }
+  });
 }
 
 /** Loads (and lazily creates) the route so pages can render the tracker. */

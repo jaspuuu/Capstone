@@ -54,6 +54,13 @@ export async function loadAttachableParent(
       });
       return r;
     }
+    case "FinancialSubmission": {
+      const f = await db.financialSubmission.findUnique({
+        where: { id: entityId },
+        select: { id: true, status: true, organizationId: true, organization: orgSelect },
+      });
+      return f;
+    }
     default:
       return null;
   }

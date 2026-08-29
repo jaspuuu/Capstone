@@ -167,6 +167,9 @@ async function main() {
   await sweep("OSAS /users", "/users", "User accounts");
   await sweep("OSAS /users/new", "/users/new");
   await sweep("OSAS /forms", "/forms");
+  await sweep("OSAS /financial", "/financial", "Financial document compliance");
+  await sweep("OSAS /financial/requirements", "/financial/requirements", "Financial requirements");
+  await sweep("OSAS org financial", `/organizations/${sampleOrg.id}/financial`, "Financial");
 
   const [sActivity, sReport, sDeadline, sUser] = await Promise.all([
     prisma.activityProposal.findFirst({ select: { id: true, title: true } }),

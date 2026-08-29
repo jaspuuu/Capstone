@@ -25,6 +25,8 @@ export type Permission =
   | "activity.approve"
   | "users.manage"
   | "college.manage"
+  | "financial.view"
+  | "financial.manage"
   | "audit.view"
   | "analytics.view";
 
@@ -57,6 +59,8 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "activity.approve",
     "users.manage",
     "college.manage",
+    "financial.view",
+    "financial.manage",
     "audit.view",
     "analytics.view",
   ],
@@ -75,6 +79,8 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "deadline.manage",
     "activity.submit",
     "activity.approve",
+    "financial.view",
+    "financial.manage",
     "audit.view",
     "analytics.view",
   ],
@@ -87,6 +93,7 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "recognition.approve",
     "deadline.view",
     "activity.approve",
+    "financial.view",
     "analytics.view",
   ],
   ADVISER_REGULAR: ADVISER,
