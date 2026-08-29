@@ -321,10 +321,10 @@ export default async function OrganizationsPage({
         </Link>
       </form>
 
-      {/* Two-panel layout: mothers left, subs/independent right */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
-        {/* LEFT — Mother Organizations */}
-        <Card className="self-start overflow-hidden lg:col-span-2">
+      {/* Horizontal split: mother organizations above, sub/independent below */}
+      <div className="flex flex-col gap-6">
+        {/* TOP — Mother Organizations */}
+        <Card className="overflow-hidden">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-5 py-4">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
@@ -425,8 +425,8 @@ export default async function OrganizationsPage({
           )}
         </Card>
 
-        {/* RIGHT — Sub-Organizations / Independent Organizations */}
-        <Card className="self-start overflow-hidden lg:col-span-3">
+        {/* BOTTOM — Sub-Organizations / Independent Organizations */}
+        <Card className="overflow-hidden">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-5 py-4">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
