@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bell, LogOut, Menu, Search, ShieldCheck, UserRound, X, Activity, Award, CalendarClock, CalendarDays, CalendarPlus, ChartColumn, ClipboardCheck, Files, LayoutDashboard, Landmark, ScrollText, School, Users } from "lucide-react";
+import { Bell, LogOut, Menu, Search, ShieldCheck, UserRound, X, Activity, Award, CalendarClock, CalendarDays, CalendarPlus, ChartColumn, ClipboardCheck, Files, LayoutDashboard, Landmark, ScrollText, School, Users, Wallet } from "lucide-react";
 import type { NavIcon, NavSection } from "@/lib/nav";
 import { logout } from "@/lib/actions/auth";
 import { availableAcademicYears } from "@/lib/ay";
@@ -21,6 +21,7 @@ const NAV_ICONS: Record<NavIcon, React.ComponentType<{ className?: string }>> = 
   calendar: CalendarDays,
   reports: ClipboardCheck,
   monitoring: Activity,
+  wallet: Wallet,
   deadlines: CalendarClock,
   forms: Files,
   analytics: ChartColumn,

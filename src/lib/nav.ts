@@ -10,6 +10,7 @@ export type NavIcon =
   | "calendar"
   | "reports"
   | "monitoring"
+  | "wallet"
   | "deadlines"
   | "forms"
   | "analytics"
@@ -36,6 +37,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { href: "/dashboard", label: "Dashboard", icon: "dashboard", permission: "org.view" },
       { href: "/monitoring", label: "Activity Monitoring", icon: "monitoring", permission: "org.view" },
       { href: "/analytics", label: "Analytics", icon: "analytics", permission: "org.view" },
+      { href: "/financial", label: "Financial", icon: "wallet", permission: "org.view" },
     ],
   },
   {
