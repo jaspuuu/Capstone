@@ -2,7 +2,7 @@ import { Activity, Award, Flag, ListChecks, ShieldAlert, Users } from "lucide-re
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { BarChart } from "@/components/ui/charts";
 import { StatCard } from "@/components/ui/stat-card";
-import { HBar, NoData } from "@/components/analytics/analytics-parts";
+import { NoData } from "@/components/analytics/analytics-parts";
 import { evalHint, evaluationSummary } from "@/lib/analytics-ui";
 import { formatMoney } from "@/lib/utils";
 import type { OrgMonitoring } from "@/lib/monitoring";
@@ -64,7 +64,7 @@ export function AnalyticsMonitoring(p: AnalyticsMonitoringProps) {
               {p.realEval.count > 0 ? (
                 <div className="mt-4 space-y-3">
                   {p.realEval.dims.map((d) => (
-                    <HBar key={d.label} label={d.label} percent={d.pct} rightText={`avg ${d.avg}/5`} />
+                    <ArcRail key={d.label} label={d.label} avg={d.avg} pct={d.pct} />
                   ))}
                 </div>
               ) : (
@@ -97,9 +97,60 @@ function BudgetUtilizationBar({ monitored }: { monitored: OrgMonitoring[] }) {
           {formatMoney(actual)} spent of {formatMoney(planned)} approved
         </p>
       </div>
-      <span className={`font-display text-lg font-bold tabular-nums ${util != null && util > 105 ? "text-red-600" : "text-content"}`}>
-        {util != null ? `${util}%` : "—"}
-      </span>
+      <div className="flex items-center gap-2">
+        {util != null && (
+          <div
+            className="h-2 w-36 overflow-hidden rounded-full bg-surface-secondary"
+            role="meter"
+            aria-valuenow={Math.round(util)}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-label={`Budget utilization ${Math.round(util)}%`}
+          >
+            <div
+              className={`h-full rounded-full ${util > 105 ? "bg-danger" : util >= 100 ? "bg-warning" : "bg-success"}`}
+              style={{ width: `${Math.min(Math.round(util), 100)}%` }}
+            />
+          </div>
+        )}
+        <span className={`w-12 text-right font-display text-lg font-bold tabular-nums ${util != null && util > 105 ? "text-danger" : "text-content"}`}>
+          {util != null ? `${Math.round(util)}%` : "—"}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The single gold signature of the analytics workspace: each officer-entered
+ * rubric dimension read as a gold rail against its 5-point scale. Gold is used
+ * only here — measured achievement — so nothing else on the page competes.
+ */
+function ArcRail({
+  label,
+  avg,
+  pct,
+}: {
+  label: string;
+  avg: number;
+  pct: number;
+}) {
+  return (
+    <div className="rounded-lg border border-line px-3 py-2">
+      <div className="flex items-baseline justify-between gap-2 text-xs">
+        <span className="font-medium text-content">{label}</span>
+        <span className="shrink-0 font-semibold tabular-nums text-content">avg {avg}/5</span>
+      </div>
+      <div
+        className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-surface-secondary"
+        role="meter"
+        aria-valuenow={avg}
+        aria-valuemin={0}
+        aria-valuemax={5}
+        aria-label={`${label}: average ${avg} of 5`}
+      >
+        <div className="h-full rounded-full bg-gold" style={{ width: `${pct}%` }} />
+      </div>
     </div>
   );
 }

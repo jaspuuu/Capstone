@@ -140,6 +140,146 @@ export function ProportionBar({
   );
 }
 
+/**
+ * Coverage ring: the fraction of a *known total* that is in hand. A circle is
+ * only meaningful for a portion of a whole (coverage), never for magnitudes
+ * that can exceed the denominator — those get bars instead (§38: value is
+ * always printed as text, never color alone).
+ */
+export function CoverageRing({
+  value,
+  total,
+  size = 64,
+  ariaLabel,
+}: {
+  value: number;
+  total: number;
+  size?: number;
+  ariaLabel?: string;
+}) {
+  const pct = total > 0 ? Math.round((value / total) * 100) : 0;
+  const R = 40;
+  const C = 2 * Math.PI * R;
+  const dash = (pct / 100) * C;
+  return (
+    <figure
+      className="relative shrink-0"
+      role="img"
+      aria-label={ariaLabel ?? `Coverage ${pct}% of ${total}`}
+    >
+      <svg viewBox="0 0 100 100" width={size} height={size}>
+        <circle cx="50" cy="50" r={R} fill="none" strokeWidth={12} className="stroke-surface-secondary" />
+        {total > 0 && (
+          <circle
+            cx="50"
+            cy="50"
+            r={R}
+            fill="none"
+            strokeWidth={12}
+            strokeLinecap="round"
+            strokeDasharray={`${Math.max(dash - 0.01, 0)} ${C}`}
+            transform="rotate(-90 50 50)"
+            className={pct >= 70 ? "stroke-success" : pct >= 40 ? "stroke-warning" : "stroke-danger"}
+          />
+        )}
+      </svg>
+      <span
+        aria-hidden
+        className="absolute inset-0 flex items-center justify-center font-display text-[15px] font-bold tabular-nums text-content"
+      >
+        {pct}%
+      </span>
+    </figure>
+  );
+}
+
+export type ArcTone = "gold" | "primary" | "success" | "warning" | "danger";
+
+const ARC_TONES: Record<ArcTone, string> = {
+  gold: "stroke-gold",
+  primary: "stroke-primary",
+  success: "stroke-success",
+  warning: "stroke-warning",
+  danger: "stroke-danger",
+};
+
+/**
+ * Semicircular rail gauge for a measured quality on a closed scale (e.g. a
+ * 1–5 rubric average or a 0–100 compliance share). The reading is always
+ * printed inside the rail.
+ */
+export function ArcGauge({
+  value,
+  max,
+  valueText,
+  label,
+  sub,
+  size = 120,
+  tone = "gold",
+  ariaLabel,
+}: {
+  value: number;
+  max: number;
+  /** Exact reading to print (e.g. "4.2" or "87%"). Defaults to rounded value. */
+  valueText?: string;
+  label?: string;
+  sub?: string;
+  size?: number;
+  tone?: ArcTone;
+  ariaLabel: string;
+}) {
+  const clamped = Math.max(0, Math.min(value, max));
+  const frac = max > 0 ? clamped / max : 0;
+  // Half-circle arc (r=42) centered at (60,60): π·r.
+  const L = Math.PI * 42;
+  const text = valueText ?? `${Math.round(clamped)}`;
+  return (
+    <figure className="flex flex-col items-center">
+      <svg
+        viewBox="0 0 120 72"
+        width={size}
+        height={size * 0.6}
+        role="img"
+        aria-label={ariaLabel}
+      >
+        <path
+          d="M18 60 A42 42 0 0 1 102 60"
+          fill="none"
+          strokeWidth={10}
+          strokeLinecap="round"
+          className="stroke-surface-secondary"
+        />
+        <path
+          d="M18 60 A42 42 0 0 1 102 60"
+          fill="none"
+          strokeWidth={10}
+          strokeLinecap="round"
+          strokeDasharray={`${frac * L} ${L}`}
+          className={ARC_TONES[tone]}
+        />
+        <text
+          x="60"
+          y="58"
+          textAnchor="middle"
+          fontSize={16}
+          fontWeight={700}
+          className="fill-content font-display"
+        >
+          {text}
+        </text>
+      </svg>
+      {(label || sub) && (
+        <figcaption className="mt-1 max-w-full text-center text-xs leading-tight">
+          {label && (
+            <span className="block truncate font-semibold text-content">{label}</span>
+          )}
+          {sub && <span className="block text-content-secondary">{sub}</span>}
+        </figcaption>
+      )}
+    </figure>
+  );
+}
+
 export type SliceTone = "success" | "danger" | "warning" | "info" | "neutral" | "muted";
 
 const SLICE_TONES: Record<SliceTone, { stroke: string; bg: string }> = {

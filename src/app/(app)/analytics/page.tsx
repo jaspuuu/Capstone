@@ -4,7 +4,7 @@ import { CalendarCheck, Flag, Users } from "lucide-react";
 import { requireUser } from "@/lib/auth/guards";
 import { can } from "@/lib/auth/rbac";
 import { db } from "@/lib/db";
-import { currentAcademicYear, formatDate } from "@/lib/utils";
+import { currentAcademicYear, formatDate, formatMoney } from "@/lib/utils";
 import {
   activityCompletionPct,
   activityCompleteTrend,
@@ -12,6 +12,7 @@ import {
   assessRisk,
   bottleneckAlerts,
   budgetAlerts,
+  budgetUtilizationPct,
   complianceByYear,
   complianceDelta,
   compliancePct,
@@ -296,6 +297,7 @@ export default async function AnalyticsPage({
     })();
     const items = checklistByOrg.get(o.id) ?? [];
     const mon = monitored.find((m) => m.id === o.id)!;
+    const budgetUtil = budgetUtilizationPct(mon.budgetPlanned, mon.budgetActual);
     const risk = risks.find((r) => r.orgId === o.id);
     const fin = financialByOrg.get(o.id) ?? "PENDING";
     const deadlineAt = deadlines
@@ -315,6 +317,11 @@ export default async function AnalyticsPage({
       financialTone: FIN_META[fin].tone,
       completion: activityCompletionPct(mon.planned, mon.completed),
       completionLabel: `${mon.completed}/${mon.planned} done`,
+      budgetUtil: budgetUtil != null ? Math.round(budgetUtil) : null,
+      budgetText:
+        budgetUtil != null
+          ? `${formatMoney(mon.budgetActual)} of ${formatMoney(mon.budgetPlanned)}`
+          : "",
       risk: risk ? (risk.level === "AT_RISK" ? "At Risk" : "Due Soon") : null,
       riskTone: risk ? (risk.level === "AT_RISK" ? "danger" : "warning") : "neutral",
       deadlineIn: deadlineAt != null ? Math.max(0, Math.ceil((deadlineAt - now.getTime()) / 86_400_000)) : null,

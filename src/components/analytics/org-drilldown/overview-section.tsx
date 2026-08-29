@@ -1,9 +1,9 @@
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { ProportionBar } from "@/components/ui/charts";
+import { ArcGauge, CoverageRing } from "@/components/ui/charts";
 import { StatCard } from "@/components/ui/stat-card";
 import { FIN_META } from "@/lib/analytics-ui";
-import { FileCheck, Users } from "lucide-react";
+import { Users } from "lucide-react";
 import type { BadgeTone } from "@/lib/constants";
 import type { FinancialStatus } from "@/lib/analytics";
 
@@ -46,7 +46,20 @@ export function DrillOverview(p: DrillOverviewProps) {
                 </>
               )}
             </div>
-            <ProportionBar value={p.compliance} total={100} />
+            <div className="mt-4 flex flex-wrap items-center gap-5">
+              <ArcGauge
+                value={p.compliance}
+                max={100}
+                valueText={`${p.compliance}%`}
+                ariaLabel={`Recognition compliance ${p.compliance}%`}
+                size={130}
+                tone="gold"
+              />
+              <p className="max-w-40 text-xs leading-relaxed text-content-secondary">
+                Share of the SF-001 checklist fully satisfied for this cycle.
+                Gold marks where measurable achievement stands.
+              </p>
+            </div>
           </CardContent>
         </Card>
 
@@ -86,7 +99,26 @@ export function DrillOverview(p: DrillOverviewProps) {
       </div>
 
       <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <StatCard label="Requirements met" value={`${p.metCount} / ${p.checklistTotal}`} icon={FileCheck} iconTone="success" hint="SF-001 accreditation checklist" />
+        <Card>
+          <CardContent className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-content-secondary">
+                Requirements coverage
+              </p>
+              <p className="mt-2 font-display text-3xl font-bold tracking-tight tabular-nums text-content">
+                {p.metCount}
+                <span className="text-sm font-semibold text-content-secondary"> / {p.checklistTotal}</span>
+              </p>
+              <p className="mt-1 text-xs text-content-muted">SF-001 accreditation checklist</p>
+            </div>
+            <CoverageRing
+              value={p.metCount}
+              total={p.checklistTotal}
+              size={64}
+              ariaLabel={`Requirements coverage ${Math.round((p.metCount / Math.max(p.checklistTotal, 1)) * 100)}%`}
+            />
+          </CardContent>
+        </Card>
         <StatCard label="Members" value={`${p.members} (${p.activeMembers} active · ${p.inactiveMembers} inactive)`} icon={Users} iconTone="info" />
       </div>
     </>

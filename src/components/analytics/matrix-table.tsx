@@ -4,7 +4,8 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { TableWrap, THead, TH, TR, TD } from "@/components/ui/table";
-import { ProportionBar } from "@/components/ui/charts";
+import { CoverageRing } from "@/components/ui/charts";
+import { cn } from "@/lib/utils";
 
 export type MatrixTone = "success" | "warning" | "info" | "neutral" | "danger";
 
@@ -21,6 +22,9 @@ export type MatrixRow = {
   financialTone: MatrixTone;
   completion: number | null;
   completionLabel: string;
+  /** Budget spent ÷ approved, as a percent (may exceed 100 = overspend). */
+  budgetUtil: number | null;
+  budgetText: string;
   risk: string | null;
   riskTone: "danger" | "warning" | "neutral";
   /** Days to the nearest applicable deadline (used for deadline-proximity sort). */
@@ -89,6 +93,7 @@ export function ComplianceMatrix({ rows }: { rows: MatrixRow[] }) {
           <TH>Requirements</TH>
           <TH>Financial</TH>
           <TH>Activities</TH>
+          <TH>Budget</TH>
           <TH>Risk</TH>
         </THead>
         <tbody>
@@ -105,7 +110,17 @@ export function ComplianceMatrix({ rows }: { rows: MatrixRow[] }) {
               </TD>
               <TD className="min-w-24">
                 {r.total > 0 ? (
-                  <ProportionBar value={r.met} total={r.total} />
+                  <div className="flex items-center gap-2">
+                    <CoverageRing
+                      value={r.met}
+                      total={r.total}
+                      size={44}
+                      ariaLabel={`Requirement coverage ${Math.round((r.met / r.total) * 100)}% of ${r.total}`}
+                    />
+                    <span className="text-[11px] font-semibold tabular-nums text-content-secondary">
+                      {r.met}/{r.total}
+                    </span>
+                  </div>
                 ) : (
                   <span className="text-xs text-content-muted">No data</span>
                 )}
@@ -115,12 +130,47 @@ export function ComplianceMatrix({ rows }: { rows: MatrixRow[] }) {
               </TD>
               <TD className="min-w-24">
                 {r.completion != null ? (
-                  <>
-                    <span className="font-semibold tabular-nums text-content">{r.completion}%</span>
-                    <span className="ml-1 text-[11px] text-content-secondary">{r.completionLabel}</span>
-                  </>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="w-10 shrink-0 font-semibold tabular-nums text-content">{r.completion}%</span>
+                      <div className="h-1.5 min-w-10 flex-1 overflow-hidden rounded-full bg-surface-secondary">
+                        <div className="h-full rounded-full bg-primary" style={{ width: `${r.completion}%` }} />
+                      </div>
+                    </div>
+                    <span className="mt-0.5 block text-[11px] text-content-secondary">{r.completionLabel}</span>
+                  </div>
                 ) : (
                   <span className="text-xs text-content-muted">No data</span>
+                )}
+              </TD>
+              <TD className="min-w-24">
+                {r.budgetUtil != null ? (
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={cn(
+                          "w-10 shrink-0 font-semibold tabular-nums",
+                          r.budgetUtil > 105 ? "text-danger" : r.budgetUtil >= 100 ? "text-warning" : "text-content"
+                        )}
+                      >
+                        {r.budgetUtil}%
+                      </span>
+                      <div className="h-1.5 min-w-10 flex-1 overflow-hidden rounded-full bg-surface-secondary">
+                        <div
+                          className={cn(
+                            "h-full rounded-full",
+                            r.budgetUtil > 105 ? "bg-danger" : r.budgetUtil >= 100 ? "bg-warning" : "bg-success"
+                          )}
+                          style={{ width: `${Math.min(Math.round(r.budgetUtil), 100)}%` }}
+                        />
+                      </div>
+                    </div>
+                    <span className="mt-0.5 block text-[11px] text-content-secondary" title={r.budgetText}>
+                      {r.budgetText}
+                    </span>
+                  </div>
+                ) : (
+                  <span className="text-xs text-content-muted">—</span>
                 )}
               </TD>
               <TD className="min-w-24">
@@ -134,7 +184,7 @@ export function ComplianceMatrix({ rows }: { rows: MatrixRow[] }) {
           ))}
           {sorted.length === 0 && (
             <TR>
-              <td colSpan={6} className="py-8 text-center text-sm text-content-muted">
+              <td colSpan={7} className="py-8 text-center text-sm text-content-muted">
                 No organizations match the current filters.
               </td>
             </TR>
