@@ -51,7 +51,18 @@ export default async function ReportDetailPage({
           members: { where: { isCurrent: true }, select: { userId: true, position: true } },
         },
       },
-      activityProposal: { select: { id: true, title: true, status: true } },
+      activityProposal: {
+        select: {
+          id: true,
+          title: true,
+          status: true,
+          startAt: true,
+          endAt: true,
+          venue: true,
+          expectedParticipants: true,
+          estimatedBudget: true,
+        },
+      },
       decidedBy: { select: { firstName: true, lastName: true } },
     },
   });
@@ -149,6 +160,33 @@ export default async function ReportDetailPage({
 
   const editable = active && isOfficer && ["DRAFT", "RETURNED"].includes(report.status);
 
+  // Evidence gate: planned-activity reports need at least one attachment on submit.
+  const evidenceCount = await db.attachment.count({
+    where: { entityType: "AccomplishmentReport", entityId: report.id },
+  });
+  const evidencePending =
+    Boolean(report.activityProposal) && ["DRAFT", "RETURNED"].includes(report.status) && evidenceCount === 0;
+  const proposal = report.activityProposal;
+  const scheduled =
+    proposal && proposal.startAt
+      ? proposal.endAt &&
+        proposal.endAt.getTime() !== proposal.startAt.getTime()
+        ? `${formatDate(proposal.startAt)} → ${formatDate(proposal.endAt)}`
+        : formatDate(proposal.startAt)
+      : null;
+  const attendanceGap =
+    proposal &&
+    report.actualParticipants != null &&
+    proposal.expectedParticipants != null &&
+    report.actualParticipants < proposal.expectedParticipants;
+  const utilization =
+    proposal &&
+    proposal.estimatedBudget != null &&
+    proposal.estimatedBudget > 0 &&
+    report.actualBudget != null
+      ? Math.round((report.actualBudget / proposal.estimatedBudget) * 100)
+      : null;
+
   return (
     <>
       <PageHeader
@@ -184,6 +222,12 @@ export default async function ReportDetailPage({
           ) : (
             <Alert tone="warning" title="Report was returned">
               {report.remarks || "See the history below for details."}
+            </Alert>
+          )}
+          {evidencePending && (
+            <Alert tone="warning" title="Supporting evidence required" className="mt-4">
+              A report for a planned activity needs at least one attached document before it can be
+              submitted. Upload attendance or proof-of-conduct under Supporting documents below.
             </Alert>
           )}
         </CardContent>
@@ -289,6 +333,74 @@ export default async function ReportDetailPage({
               </div>
             </CardContent>
           </Card>
+
+          {proposal && (
+            <Card>
+              <CardHeader
+                title="Against the approved plan"
+                description="Planned in the linked activity proposal vs what actually happened."
+              />
+              <CardContent>
+                {attendanceGap && (
+                  <Alert tone="warning" title="Attendance below plan" className="mb-4">
+                    Actual participants ({report.actualParticipants}) fell below the planned{" "}
+                    {proposal.expectedParticipants}. Confirm the reason in the narrative.
+                  </Alert>
+                )}
+                <dl className="grid grid-cols-1 gap-x-8 gap-y-3 text-sm sm:grid-cols-2">
+                  <div className="flex justify-between gap-4 sm:block">
+                    <dt className="text-content-secondary">Scheduled</dt>
+                    <dd className="font-medium text-content">{scheduled ?? "—"}</dd>
+                  </div>
+                  <div className="flex justify-between gap-4 sm:block">
+                    <dt className="text-content-secondary">Venue</dt>
+                    <dd className="text-content">{proposal.venue ?? "—"}</dd>
+                  </div>
+                  <div className="flex justify-between gap-4 sm:block">
+                    <dt className="text-content-secondary">Participants</dt>
+                    <dd className="tabular-nums text-content">
+                      {proposal.expectedParticipants != null ? (
+                        <>
+                          {proposal.expectedParticipants} planned
+                          {report.actualParticipants != null && (
+                            <span className="ml-1 text-xs text-content-secondary">
+                              · {report.actualParticipants} actual
+                            </span>
+                          )}
+                        </>
+                      ) : (
+                        report.actualParticipants ?? "—"
+                      )}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between gap-4 sm:block">
+                    <dt className="text-content-secondary">Approved budget</dt>
+                    <dd className="tabular-nums text-content">
+                      {proposal.estimatedBudget != null ? formatMoney(proposal.estimatedBudget) : "—"}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between gap-4 sm:block">
+                    <dt className="text-content-secondary">Actual expenses</dt>
+                    <dd className="tabular-nums text-content">
+                      {report.actualBudget != null ? formatMoney(report.actualBudget) : "—"}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between gap-4 sm:block">
+                    <dt className="text-content-secondary">Budget utilized</dt>
+                    <dd className="tabular-nums text-content">
+                      {utilization != null ? (
+                        <span className={utilization > 100 ? "font-semibold text-red-600" : ""}>
+                          {utilization}%
+                        </span>
+                      ) : (
+                        "—"
+                      )}
+                    </dd>
+                  </div>
+                </dl>
+              </CardContent>
+            </Card>
+          )}
 
           <AttachmentsCard
             entityType="AccomplishmentReport"

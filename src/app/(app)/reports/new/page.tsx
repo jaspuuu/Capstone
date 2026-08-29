@@ -34,6 +34,11 @@ export default async function NewReportPage({
     orderBy: { startAt: "desc" },
   });
 
+  // Prefill from the activity page's "File report" link when present.
+  const prefillProposal = sp.proposal
+    ? proposals.find((p) => p.id === sp.proposal) ?? null
+    : null;
+
   return (
     <div className="mx-auto max-w-2xl">
       <PageHeader
@@ -63,18 +68,30 @@ export default async function NewReportPage({
               organizationId: p.organizationId,
             }))}
             initial={
-              sp.proposal || sp.org
+              prefillProposal
                 ? {
                     id: "",
-                    organizationId: sp.org ?? "",
-                    activityProposalId: sp.proposal ?? null,
-                    title: "",
+                    organizationId: prefillProposal.organizationId,
+                    activityProposalId: prefillProposal.id,
+                    title: prefillProposal.title,
                     narrative: "",
-                    heldOn: new Date(),
+                    heldOn: prefillProposal.startAt ?? new Date(),
                     actualParticipants: null,
                     actualBudget: null,
+                    expectedParticipants: prefillProposal.expectedParticipants,
                   }
-                : undefined
+                : sp.org
+                  ? {
+                      id: "",
+                      organizationId: sp.org,
+                      activityProposalId: sp.proposal ?? null,
+                      title: "",
+                      narrative: "",
+                      heldOn: new Date(),
+                      actualParticipants: null,
+                      actualBudget: null,
+                    }
+                  : undefined
             }
             submitLabel="Save report"
           />

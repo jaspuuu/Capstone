@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { Alert } from "@/components/ui/alert";
 import { Field, Input, Select, Textarea } from "@/components/ui/form";
 import { SubmitButton } from "@/components/ui/submit-button";
@@ -16,6 +16,7 @@ export type ReportInitial = {
   heldOn: Date;
   actualParticipants: number | null;
   actualBudget: number | null;
+  expectedParticipants?: number | null;
 };
 
 function toLocalDate(date: Date): string {
@@ -37,6 +38,15 @@ export function ReportForm({
   submitLabel: string;
 }) {
   const [state, formAction] = useActionState<ActionState, FormData>(action, {});
+  const [participants, setParticipants] = useState<string>(
+    initial?.actualParticipants != null ? String(initial.actualParticipants) : ""
+  );
+  const expected = initial?.expectedParticipants ?? null;
+  const belowExpected =
+    expected != null &&
+    participants.trim() !== "" &&
+    !Number.isNaN(Number(participants)) &&
+    Number(participants) < expected;
 
   return (
     <form action={formAction} className="space-y-5">
@@ -94,7 +104,13 @@ export function ReportForm({
             min="0"
             step="1"
             defaultValue={initial?.actualParticipants ?? ""}
+            onChange={(e) => setParticipants(e.target.value)}
           />
+          {belowExpected && (
+            <p className="mt-1 text-xs font-medium text-red-600">
+              Below the planned {expected} participants — confirm this in the narrative.
+            </p>
+          )}
         </Field>
         <Field label="Actual expenses (₱)" htmlFor="actualBudget">
           <Input

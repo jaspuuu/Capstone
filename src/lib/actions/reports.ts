@@ -62,6 +62,14 @@ function parseForm(formData: FormData) {
   });
 }
 
+/** Reject a held-on date still in the future (e.g. typo or pre-filed report). */
+function heldOnInFuture(heldOn: string): boolean {
+  const held = new Date(`${heldOn}T00:00:00`);
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return held.getTime() > startOfToday.getTime();
+}
+
 // ---------------------------------------------------------------------------
 // Create / update — officers or admins on behalf
 // ---------------------------------------------------------------------------
@@ -74,6 +82,10 @@ export async function createReport(_prev: ActionState, formData: FormData): Prom
     return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
   }
   const d = parsed.data;
+
+  if (heldOnInFuture(d.heldOn)) {
+    return { error: "The held-on date cannot be in the future." };
+  }
 
   if (!can(user, "org.manage")) {
     const membership = await db.organizationMember.findFirst({
@@ -144,6 +156,10 @@ export async function updateReport(_prev: ActionState, formData: FormData): Prom
     return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
   }
   const d = parsed.data;
+
+  if (heldOnInFuture(d.heldOn)) {
+    return { error: "The held-on date cannot be in the future." };
+  }
 
   const report = await loadReport(id);
   if (!report) return { error: "Report not found." };
@@ -232,6 +248,18 @@ function transitionAction(transition: keyof typeof TRANSITIONS) {
     if (transition === "SUBMIT") {
       if (!can(user, "org.manage") && !isOfficerOf(user.id, report.organization)) {
         return { error: "Only officers of the organization can submit this report." };
+      }
+      // Planned-activity reports require at least one piece of supporting
+      // evidence before they can be submitted for review.
+      if (report.activityProposalId) {
+        const evidence = await db.attachment.count({
+          where: { entityType: "AccomplishmentReport", entityId: id },
+        });
+        if (evidence === 0) {
+          return {
+            error: "Attach at least one supporting document before submitting a report for a planned activity.",
+          };
+        }
       }
     } else {
       // Review authority mirrors recognition review scoping:

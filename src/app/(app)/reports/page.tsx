@@ -48,6 +48,20 @@ export default async function ReportsPage({
     orderBy: [{ heldOn: "desc" }],
   });
 
+  // Approved proposals this AY without a report yet — the filing gap OSAS sees.
+  const awaiting = await db.activityProposal.findMany({
+    where: { status: "APPROVED", academicYear: ay, report: null, organization: scopedOrgWhere(user) },
+    include: { organization: { select: { acronym: true, name: true } } },
+    orderBy: { endAt: "asc" },
+  });
+  const now = new Date();
+
+  const KPI = (["SUBMITTED", "RETURNED", "DRAFT", "ACCEPTED"] as const).map((key) => ({
+    key,
+    label: REPORT_STATUS_META[key].label,
+    count: reports.filter((r) => r.status === key).length,
+  }));
+
   return (
     <>
       <PageHeader
@@ -65,6 +79,17 @@ export default async function ReportsPage({
           )
         }
       />
+
+      <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {KPI.map((k) => (
+          <div key={k.key} className="rounded-xl border border-line bg-background p-3 text-center">
+            <p className={`font-display text-2xl font-bold ${k.count > 0 ? "text-content" : "text-content-muted"}`}>
+              {k.count}
+            </p>
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-content-muted">{k.label}</p>
+          </div>
+        ))}
+      </div>
 
       <form action="/reports" className="mb-5 flex flex-wrap items-end gap-3">
         <div className="min-w-52 flex-1">
@@ -172,6 +197,52 @@ export default async function ReportsPage({
           </ul>
         </>
       )}
+
+      <Card className="mt-6">
+        <div className="border-b border-line px-5 py-4">
+          <h2 className="font-display text-base font-bold text-content">
+            Activities awaiting a report
+          </h2>
+          <p className="mt-0.5 text-xs text-content-secondary">
+            Approved activities with no accomplishment report filed yet this AY.
+          </p>
+        </div>
+        <div className="px-5 py-4">
+          {awaiting.length === 0 ? (
+            <p className="text-sm text-content-muted">
+              No approved activities are missing a report — every planned activity is filed up to date.
+            </p>
+          ) : (
+            <ul className="divide-y divide-line">
+              {awaiting.map((a) => {
+                const overdue = a.endAt && a.endAt.getTime() < now.getTime();
+                return (
+                  <li key={a.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-content">{a.title}</p>
+                      <p className="text-xs text-content-secondary">
+                        {a.organization.acronym ?? a.organization.name}
+                        {a.endAt && <span> · planned end {formatDate(a.endAt)}</span>}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      {overdue && (
+                        <Badge tone="danger">Overdue</Badge>
+                      )}
+                      <Link
+                        href={`/reports/new?proposal=${a.id}`}
+                        className="rounded-lg border border-line-strong px-3 py-1.5 text-xs font-semibold text-content hover:border-primary hover:text-primary"
+                      >
+                        File report
+                      </Link>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      </Card>
     </>
   );
 }

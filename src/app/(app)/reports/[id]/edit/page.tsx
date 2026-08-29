@@ -47,6 +47,14 @@ export default async function EditReportPage({
 
   const organizations = await filingOrganizations(user);
 
+  // Expected participants from the currently linked proposal (form-side warning only).
+  const linked = report.activityProposalId
+    ? await db.activityProposal.findUnique({
+        where: { id: report.activityProposalId },
+        select: { expectedParticipants: true },
+      })
+    : null;
+
   // Approved proposals without reports — include the currently linked one so
   // the selection stays valid while editing.
   const proposals = await db.activityProposal.findMany({
@@ -96,6 +104,7 @@ export default async function EditReportPage({
               heldOn: report.heldOn,
               actualParticipants: report.actualParticipants,
               actualBudget: report.actualBudget,
+              expectedParticipants: linked?.expectedParticipants ?? null,
             }}
             submitLabel="Save changes"
           />
