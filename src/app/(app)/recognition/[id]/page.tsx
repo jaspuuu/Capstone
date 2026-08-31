@@ -1,19 +1,19 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Award, CalendarClock, CheckCircle2, FileText, Gavel, History, Undo2 } from "lucide-react";
+import { Award, CalendarClock, CheckCircle2, CircleDashed, FileStack, FileText, Gavel, History, Undo2 } from "lucide-react";
 import { requireUser } from "@/lib/auth/guards";
 import { can } from "@/lib/auth/rbac";
 import { db } from "@/lib/db";
-import { RECOGNITION_STATUS_META, INTERVIEW_STATUS_META } from "@/lib/constants";
-import { RECOGNITION_STEPS, recognitionStepIndex } from "@/lib/org-state";
+import { RECOGNITION_STATUS_META, INTERVIEW_STATUS_META, REQUIREMENT_STATUS_META } from "@/lib/constants";
+import { checklistForYear, compliancePct } from "@/lib/analytics";
 import { formatDateTime, fullName } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Alert } from "@/components/ui/alert";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Field, Textarea } from "@/components/ui/form";
 import { PageHeader } from "@/components/ui/page-header";
-import { WorkflowSteps } from "@/components/ui/progress";
+import { WorkflowTracker } from "@/components/ui/workflow-tracker";
 import { Timeline } from "@/components/ui/timeline";
 import { ActionForm } from "@/components/action-form";
 import { AttachmentsCard } from "@/components/attachments-card";
@@ -83,8 +83,34 @@ export default async function RecognitionDetailPage({
   const isOfficer =
     (user.role === "PRESIDENT" || user.role === "SECRETARY") &&
     rec.organization.members.some((m) => m.userId === user.id);
-  const stepIndex = recognitionStepIndex(rec.status);
   const meta = RECOGNITION_STATUS_META[rec.status];
+
+  // ---- SF-001 requirements for this application (President-facing) -------
+  const [recAttachments, reports, financialSubmissions] = await Promise.all([
+    db.attachment.findMany({
+      where: { entityType: "Recognition", entityId: rec.id },
+      select: { kind: true },
+    }),
+    db.accomplishmentReport.findMany({
+      where: { organizationId: rec.organizationId, academicYear: rec.academicYear },
+      select: { academicYear: true, status: true },
+    }),
+    db.financialSubmission.findMany({
+      where: { organizationId: rec.organizationId, academicYear: rec.academicYear },
+      select: { academicYear: true, status: true },
+    }),
+  ]);
+  const requirementItems = checklistForYear(
+    [{ academicYear: rec.academicYear, status: rec.status }],
+    recAttachments
+      .filter((a): a is { kind: NonNullable<typeof a.kind> } => a.kind !== null)
+      .map((a) => ({ academicYear: rec.academicYear, kind: a.kind })),
+    reports,
+    rec.academicYear,
+    financialSubmissions
+  );
+  const compliance = compliancePct(requirementItems);
+  const requirementsMet = requirementItems.every((i) => i.met);
 
   // ---- Available actions ---------------------------------------------------
   type Panel = {
@@ -281,13 +307,18 @@ export default async function RecognitionDetailPage({
         }
       />
 
-      {/* Workflow */}
+      {/* Workflow — official application process tracker (client-defined) */}
       <Card className="mb-6">
-        <CardContent className="py-6">
-          {stepIndex >= 0 ? (
-            <WorkflowSteps steps={[...RECOGNITION_STEPS]} currentIndex={stepIndex} />
-          ) : (
-            <Alert tone={rec.status === "REJECTED" ? "danger" : "warning"} title={`Application was ${meta.label.toLowerCase()}`}>
+        <CardContent className="space-y-5 py-6">
+          <WorkflowTracker
+            process={rec.kind === "RENEWAL" ? "RENEWAL" : "RECOGNITION"}
+            status={rec.status}
+          />
+          {(rec.status === "RETURNED" || rec.status === "REJECTED") && (
+            <Alert
+              tone={rec.status === "REJECTED" ? "danger" : "warning"}
+              title={`Application was ${meta.label.toLowerCase()}`}
+            >
               {rec.remarks || "See the timeline below for details."}
             </Alert>
           )}
@@ -333,6 +364,82 @@ export default async function RecognitionDetailPage({
               </CardContent>
             </Card>
           )}
+
+          {/* SF-001 requirements — the COMPLETE REQUIREMENT? gate */}
+          <Card>
+            <CardHeader
+              icon={FileStack}
+              title={`SF-001 requirements · AY ${rec.academicYear}`}
+              description={`${requirementItems.filter((i) => i.met).length}/${requirementItems.length} complete · ${compliance}% of required documents filed.`}
+            />
+            <CardContent className="space-y-3">
+              <ul className="divide-y divide-line">
+                {requirementItems.map((item) => (
+                  <li key={item.key} className="flex flex-wrap items-center justify-between gap-2 py-2.5">
+                    <div className="flex min-w-0 items-center gap-2.5">
+                      {item.met ? (
+                        <CheckCircle2 className="size-4.5 shrink-0 text-green-600" aria-hidden />
+                      ) : (
+                        <CircleDashed className="size-4.5 shrink-0 text-content-muted" aria-hidden />
+                      )}
+                      <span className="text-sm font-semibold text-content">{item.label}</span>
+                    </div>
+                    <Badge tone={REQUIREMENT_STATUS_META[item.status].tone}>
+                      {REQUIREMENT_STATUS_META[item.status].label}
+                    </Badge>
+                  </li>
+                ))}
+              </ul>
+
+              {rec.status === "RETURNED" && (
+                <div className="rounded-lg border border-warning/30 bg-warning-light/40 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-warning">
+                    Follow-up required
+                  </p>
+                  <ul className="mt-2 space-y-1.5">
+                    {requirementItems
+                      .filter((i) => !i.met)
+                      .map((i) => (
+                        <li key={i.key} className="flex items-center gap-1.5 text-sm text-content">
+                          <CircleDashed className="size-3.5 shrink-0 text-content-muted" aria-hidden />
+                          <span>{i.label}</span>
+                          <Badge tone="danger">Missing</Badge>
+                        </li>
+                      ))}
+                    {requirementItems
+                      .filter((i) => i.met && i.status === "RETURNED")
+                      .map((i) => (
+                        <li key={i.key} className="flex items-center gap-1.5 text-sm text-content">
+                          <Undo2 className="size-3.5 shrink-0 text-warning" aria-hidden />
+                          <span>{i.label}</span>
+                          <Badge tone="orange">Correction</Badge>
+                        </li>
+                      ))}
+                    {requirementItems.every((i) => i.met) && (
+                      <li className="text-sm text-content-secondary">
+                        All required documents are on file — address the reviewer remarks above and
+                        resubmit.
+                      </li>
+                    )}
+                  </ul>
+                </div>
+              )}
+
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-surface-secondary px-3 py-2 text-xs text-content-secondary">
+                <span>
+                  {!requirementsMet && ["DRAFT", "RETURNED"].includes(rec.status)
+                    ? "Submission is blocked until every required document is complete."
+                    : "Documents track their application: Submitted → Under Review → Approved (or Returned)."}
+                </span>
+                <Link
+                  href={`/organizations/${rec.organizationId}/documents`}
+                  className="shrink-0 font-semibold text-primary hover:underline"
+                >
+                  Manage documents
+                </Link>
+              </div>
+            </CardContent>
+          </Card>
 
           {/* §16-§18: Interview stage */}
           {(showInterviewControls || rec.interviewStatus !== "NOT_SCHEDULED") && (

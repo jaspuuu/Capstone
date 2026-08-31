@@ -320,6 +320,139 @@ export const RENEWAL_WORKFLOW: WorkflowDef<RecognitionStatus> = {
 };
 
 // ---------------------------------------------------------------------------
+// Client-defined high-level application process — the linear tracker shown to
+// the President and admins for organization applications, recognition and
+// renewal. The granular status chains above still drive enforcement (who can
+// act, when, with what per-status nuance); those statuses map onto this
+// high-level strip so the visible tracker always matches the official
+// APPLICATION → REQUIREMENTS → SUBMISSION → INTERVIEW → FOLLOW-UP →
+// APPROVAL/DISAPPROVAL → END process. Signatures live inside the documents
+// (SF routing), never as extra stages here.
+// ---------------------------------------------------------------------------
+
+export type OfficialStageKey =
+  | "APPLICATION"
+  | "REQUIREMENTS"
+  | "SUBMISSION"
+  | "INTERVIEW"
+  | "FOLLOW_UP"
+  | "DECISION"
+  | "END";
+
+export type OfficialStage = { key: OfficialStageKey; label: string };
+
+export const OFFICIAL_APP_STAGES: readonly OfficialStage[] = [
+  { key: "APPLICATION", label: "Application" },
+  { key: "REQUIREMENTS", label: "Requirements" },
+  { key: "SUBMISSION", label: "Submission" },
+  { key: "INTERVIEW", label: "Interview" },
+  { key: "FOLLOW_UP", label: "Follow-up" },
+  { key: "DECISION", label: "Decision" },
+  { key: "END", label: "End" },
+];
+
+/** What happens inside each high-level stage, shown to the President/admin. */
+export const OFFICIAL_STAGE_FACTS: Record<OfficialStageKey, { action: string; heldBy: string }> = {
+  APPLICATION: {
+    action: "Complete the application profile, roster and adviser assignment.",
+    heldBy: "Organization President / Secretary",
+  },
+  REQUIREMENTS: {
+    action: "Complete the required documents (SF-001) before filing.",
+    heldBy: "Organization President / Secretary",
+  },
+  SUBMISSION: {
+    action: "Application filed and locked — awaiting the first review.",
+    heldBy: "Reviewer",
+  },
+  INTERVIEW: {
+    action: "Application reviewed and the interview conducted.",
+    heldBy: "Adviser / Dean / SOA",
+  },
+  FOLLOW_UP: {
+    action: "Address the returned notes and resubmit the application.",
+    heldBy: "Organization President / Secretary",
+  },
+  DECISION: {
+    action: "Final approval or disapproval is recorded against the application.",
+    heldBy: "SOA / OSAS",
+  },
+  END: {
+    action: "Process complete — the application record is preserved.",
+    heldBy: "—",
+  },
+};
+
+/**
+ * High-level stage each granular status lands on (client-defined process).
+ * Application-level sub-steps collapse into the matching official stage; the
+ * per-status reviewer chain still governs enforcement (§6).
+ */
+export const OFFICIAL_STAGE_BY_PROCESS: Record<
+  ProcessKey,
+  Partial<Record<string, OfficialStageKey>>
+> = {
+  ORG_APPLICATION: {
+    DRAFT: "APPLICATION",
+    SUBMITTED: "SUBMISSION",
+    UNDER_REVIEW: "INTERVIEW",
+    FOR_SIGNATURE: "INTERVIEW",
+    FOR_APPROVAL: "INTERVIEW",
+    APPROVED: "DECISION",
+    RECOGNIZED: "END",
+    RETURNED: "FOLLOW_UP",
+    REJECTED: "DECISION",
+  },
+  RECOGNITION: {
+    DRAFT: "APPLICATION",
+    SUBMITTED: "SUBMISSION",
+    UNDER_REVIEW: "INTERVIEW",
+    FOR_APPROVAL: "INTERVIEW",
+    FOR_SIGNATURE: "DECISION",
+    APPROVED: "DECISION",
+    RECOGNIZED: "END",
+    RETURNED: "FOLLOW_UP",
+    REJECTED: "DECISION",
+    EXPIRED: "END",
+  },
+  RENEWAL: {
+    DRAFT: "APPLICATION",
+    SUBMITTED: "SUBMISSION",
+    UNDER_REVIEW: "INTERVIEW",
+    FOR_APPROVAL: "INTERVIEW",
+    FOR_SIGNATURE: "DECISION",
+    APPROVED: "DECISION",
+    RECOGNIZED: "END",
+    RETURNED: "FOLLOW_UP",
+    REJECTED: "DECISION",
+    EXPIRED: "END",
+  },
+  ACTIVITY_PROPOSAL: {},
+  ACCOMPLISHMENT_REPORT: {},
+  SF_FORM: {},
+};
+
+export function officialStageFor(process: ProcessKey, status: string): OfficialStageKey {
+  return OFFICIAL_STAGE_BY_PROCESS[process][status] ?? "APPLICATION";
+}
+
+export function officialStageIndex(process: ProcessKey, status: string): number {
+  const stage = officialStageFor(process, status);
+  return OFFICIAL_APP_STAGES.findIndex((s) => s.key === stage);
+}
+
+/** The official stage label that follows `status`, or null at the end. */
+export function officialNextStage(process: ProcessKey, status: string): string | null {
+  const i = officialStageIndex(process, status);
+  if (i < 0 || i >= OFFICIAL_APP_STAGES.length - 1) return null;
+  return OFFICIAL_APP_STAGES[i + 1].label;
+}
+
+export function officialStageFacts(process: ProcessKey, status: string) {
+  return OFFICIAL_STAGE_FACTS[officialStageFor(process, status)];
+}
+
+// ---------------------------------------------------------------------------
 // §20/§22  Activity proposal (plan → proposal → endorsement → approval →
 // implementation → accomplishment → archive).
 // ---------------------------------------------------------------------------

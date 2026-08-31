@@ -28,13 +28,13 @@ import {
   ORG_TYPE_LABELS,
   RECOGNITION_STATUS_META,
 } from "@/lib/constants";
-import { deriveOrgState, ORG_APPLICATION_STEPS, orgApplicationStepIndex } from "@/lib/org-state";
+import { deriveOrgState } from "@/lib/org-state";
 import { currentAcademicYear, formatDate, fullName } from "@/lib/utils";import { Badge, Chip } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Alert } from "@/components/ui/alert";
 import { Field, Select, Textarea } from "@/components/ui/form";
-import { WorkflowSteps } from "@/components/ui/progress";
+import { WorkflowTracker } from "@/components/ui/workflow-tracker";
 import { ActionForm, QuickActionForm } from "@/components/action-form";
 import {
   addMember,
@@ -347,9 +347,10 @@ export default async function OrganizationDetailPage({
               <CardHeader
                 icon={ClipboardList}
                 title="Organization application"
-                description="Created and completed by the President. It passes through Senior Adviser → Dean → SOA → OSAS reviews before recognition is granted."
+                description="Created and completed by the President, then processed through the official application flow — requirements, submission, interview, follow-up — before approval or disapproval."
               />
               <CardContent className="space-y-4">
+                <WorkflowTracker process="ORG_APPLICATION" status={org.applicationStatus} />
                 {org.applicationStatus === "RETURNED" || org.applicationStatus === "REJECTED" ? (
                   <Alert
                     tone={org.applicationStatus === "REJECTED" ? "danger" : "warning"}
@@ -363,12 +364,7 @@ export default async function OrganizationDetailPage({
                       ? org.applicationRemark
                       : "The reviewer did not leave a note."}
                   </Alert>
-                ) : (
-                  <WorkflowSteps
-                    steps={ORG_APPLICATION_STEPS}
-                    currentIndex={orgApplicationStepIndex(org)}
-                  />
-                )}
+                ) : null}
 
                 {/* President / Secretary — complete and file the application */}
                 {isOfficer && canOfficerEdit && (

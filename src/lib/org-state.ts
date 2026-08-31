@@ -2,7 +2,6 @@ import type { Organization, Recognition } from "@/generated/prisma/client";
 import { compareAcademicYear, currentAcademicYear } from "@/lib/utils";
 import {
   ACTIVITY_PHASES,
-  ORG_APPLICATION_WORKFLOW,
   RECOGNITION_WORKFLOW,
   REPORT_WORKFLOW,
 } from "@/lib/workflow";
@@ -90,25 +89,6 @@ export function deriveOrgState(
 
   // An org whose application passed all reviews is established.
   return "RECOGNIZED";
-}
-
-/**
- * §5: President-driven creation workflow shown on the organization page:
- * create draft → submit → adviser review → dean review → SOA review → OSAS
- * approval → recognized. RETURNED/REJECTED render as alerts instead of steps.
- * Steps are derived from the shared workflow registry (§6).
- */
-export const ORG_APPLICATION_STEPS = ORG_APPLICATION_WORKFLOW.steps.map((s) => ({
-  key: s.status,
-  label: s.label,
-}));
-
-export function orgApplicationStepIndex(
-  org: Pick<Organization, "applicationStatus">
-): number {
-  return ORG_APPLICATION_WORKFLOW.steps.findIndex(
-    (s) => s.status === org.applicationStatus
-  );
 }
 
 /** Workflow steps shown on the recognition progress bar (§11, §29). */
