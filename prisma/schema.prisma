@@ -55,27 +55,27 @@ model User {
   createdAt          DateTime    @default(now())
   updatedAt          DateTime    @updatedAt
 
-  sessions               Session[]
-  memberships            OrganizationMember[]
-  adviserAssignments     AdviserAssignment[]
-  deanOfColleges         College[]              @relation("CollegeDean")
-  auditLogs              AuditLog[]
-  recognitionEvents      RecognitionEvent[]     @relation("RecognitionEventActor")
-  decidedRecognitions    Recognition[]          @relation("RecognitionDecidedBy")
-  decidedProposals       ActivityProposal[]     @relation("ProposalDecidedBy")
-  decidedReports         AccomplishmentReport[] @relation("ReportDecidedBy")
-  createdDeadlines       Deadline[]             @relation("DeadlineCreator")
-  uploadedAttachments    Attachment[]           @relation("AttachmentUploader")
-  notifications          Notification[]         @relation("NotificationRecipient")
-  attendanceRecords      ActivityAttendance[]   @relation("ActivityAttendanceUser")
-  recordedAttendance     ActivityAttendance[]   @relation("ActivityAttendanceRecorder")
-  decisionsEvaluations   ActivityEvaluation[]   @relation("ActivityEvaluationEvaluator")
-  createdCheckIns        ActivityCheckIn[]      @relation("CheckInCreator")
-  decidedMemberships     OrganizationMember[]   @relation("MembershipDecidedBy")
-  endedAdviserTerms      AdviserAssignment[]    @relation("AdviserAssignmentEnder")
-  createdSignatureRoutes SignatureRoute[]       @relation("SignatureRouteCreator")
-  signatureSteps         SignatureStep[]        @relation("SignatureStepSigner")
-  actedSignatureSteps    SignatureStep[]        @relation("SignatureStepActor")
+  sessions                     Session[]
+  memberships                  OrganizationMember[]
+  adviserAssignments           AdviserAssignment[]
+  deanOfColleges               College[]              @relation("CollegeDean")
+  auditLogs                    AuditLog[]
+  recognitionEvents            RecognitionEvent[]     @relation("RecognitionEventActor")
+  decidedRecognitions          Recognition[]          @relation("RecognitionDecidedBy")
+  decidedProposals             ActivityProposal[]     @relation("ProposalDecidedBy")
+  decidedReports               AccomplishmentReport[] @relation("ReportDecidedBy")
+  createdDeadlines             Deadline[]             @relation("DeadlineCreator")
+  uploadedAttachments          Attachment[]           @relation("AttachmentUploader")
+  notifications                Notification[]         @relation("NotificationRecipient")
+  attendanceRecords            ActivityAttendance[]   @relation("ActivityAttendanceUser")
+  recordedAttendance           ActivityAttendance[]   @relation("ActivityAttendanceRecorder")
+  decisionsEvaluations         ActivityEvaluation[]   @relation("ActivityEvaluationEvaluator")
+  createdCheckIns              ActivityCheckIn[]      @relation("CheckInCreator")
+  decidedMemberships           OrganizationMember[]   @relation("MembershipDecidedBy")
+  endedAdviserTerms            AdviserAssignment[]    @relation("AdviserAssignmentEnder")
+  createdSignatureRoutes       SignatureRoute[]       @relation("SignatureRouteCreator")
+  signatureSteps               SignatureStep[]        @relation("SignatureStepSigner")
+  actedSignatureSteps          SignatureStep[]        @relation("SignatureStepActor")
   createdFinancialRequirements FinancialRequirement[] @relation("FinancialRequirementCreator")
   createdFinancialSubmissions  FinancialSubmission[]  @relation("FinancialSubmissionCreator")
   decidedFinancialSubmissions  FinancialSubmission[]  @relation("FinancialSubmissionDecidedBy")
@@ -189,39 +189,55 @@ enum AdviserType {
   PART_TIME
 }
 
+// Interview workflow stage for organization application / recognition /
+// renewal (client-defined application process).
+enum InterviewStatus {
+  NOT_SCHEDULED
+  SCHEDULED
+  COMPLETED
+  FOR_ADDITIONAL_REVIEW
+  PASSED
+  NEEDS_REVISION
+}
+
 model Organization {
-  id             String         @id @default(cuid())
-  name           String
-  acronym        String?
-  description    String?
-  type           OrgType        @default(INDEPENDENT)
-  parentId       String?
-  parent         Organization?  @relation("OrgHierarchy", fields: [parentId], references: [id])
-  children       Organization[] @relation("OrgHierarchy")
-  collegeId      String
-  college        College        @relation(fields: [collegeId], references: [id])
-  departmentId   String?
-  department     Department?    @relation(fields: [departmentId], references: [id])
-  status         OrgStatus      @default(ACTIVE)
+  id                String               @id @default(cuid())
+  name              String
+  acronym           String?
+  description       String?
+  type              OrgType              @default(INDEPENDENT)
+  parentId          String?
+  parent            Organization?        @relation("OrgHierarchy", fields: [parentId], references: [id])
+  children          Organization[]       @relation("OrgHierarchy")
+  collegeId         String
+  college           College              @relation(fields: [collegeId], references: [id])
+  departmentId      String?
+  department        Department?          @relation(fields: [departmentId], references: [id])
+  status            OrgStatus            @default(ACTIVE)
   // President-driven application lifecycle: DRAFT → SUBMITTED → review chain.
   applicationStatus OrgApplicationStatus @default(DRAFT)
-  submittedAt    DateTime?
+  submittedAt       DateTime?
   // Reviewer note on returned/rejected applications.
   applicationRemark String?
-  decidedAt      DateTime?
-  decidedById    String?
-  foundedYear    Int?
+  decidedAt         DateTime?
+  decidedById       String?
+  // §Interview: interview is a first-class stage of the organization
+  // application process (mirrors the Recognition interview fields).
+  interviewStatus   InterviewStatus      @default(NOT_SCHEDULED)
+  interviewAt       DateTime?
+  interviewNotes    String?
+  foundedYear       Int?
   // Organization-uploaded identity asset (file in storage/uploads).
-  logoStoredName String?
-  archivedAt     DateTime?
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
+  logoStoredName    String?
+  archivedAt        DateTime?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
 
-  advisers     AdviserAssignment[]
-  members      OrganizationMember[]
-  recognitions Recognition[]
-  activities   ActivityProposal[]
-  reports      AccomplishmentReport[]
+  advisers             AdviserAssignment[]
+  members              OrganizationMember[]
+  recognitions         Recognition[]
+  activities           ActivityProposal[]
+  reports              AccomplishmentReport[]
   financialSubmissions FinancialSubmission[]
 
   @@index([collegeId])
@@ -276,16 +292,6 @@ model AdviserAssignment {
 enum RecognitionKind {
   INITIAL
   RENEWAL
-}
-
-// Interview workflow stage for recognition/renewal (§23).
-enum InterviewStatus {
-  NOT_SCHEDULED
-  SCHEDULED
-  COMPLETED
-  FOR_ADDITIONAL_REVIEW
-  PASSED
-  NEEDS_REVISION
 }
 
 enum RecognitionStatus {
@@ -756,18 +762,18 @@ model AuditLog {
 // ---------------------------------------------------------------------------
 
 model FinancialRequirement {
-  id          String   @id @default(cuid())
-  code        String   @unique
+  id          String           @id @default(cuid())
+  code        String           @unique
   name        String
   description String?
-  process     FinancialProcess        @default(RECOGNITION)
+  process     FinancialProcess @default(RECOGNITION)
   // Signatory chain for this requirement; empty = canonical default.
   signers     SignatoryRole[]
-  isActive    Boolean  @default(true)
+  isActive    Boolean          @default(true)
   createdById String
-  createdBy   User     @relation("FinancialRequirementCreator", fields: [createdById], references: [id])
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdBy   User             @relation("FinancialRequirementCreator", fields: [createdById], references: [id])
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
 
   submissions FinancialSubmission[]
 
@@ -775,29 +781,29 @@ model FinancialRequirement {
 }
 
 model FinancialSubmission {
-  id             String   @id @default(cuid())
+  id             String                    @id @default(cuid())
   organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization   Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   requirementId  String
-  requirement    FinancialRequirement @relation(fields: [requirementId], references: [id], onDelete: Cascade)
+  requirement    FinancialRequirement      @relation(fields: [requirementId], references: [id], onDelete: Cascade)
   academicYear   String
   status         FinancialSubmissionStatus @default(DRAFT)
   // Mirrors SignatureRoute.version (increments on each reviewer return).
-  version        Int      @default(1)
+  version        Int                       @default(1)
   deadlineId     String?
-  deadline       Deadline? @relation(fields: [deadlineId], references: [id])
+  deadline       Deadline?                 @relation(fields: [deadlineId], references: [id])
   submittedAt    DateTime?
   resubmittedAt  DateTime?
   decidedAt      DateTime?
   decidedById    String?
-  decidedBy      User?    @relation("FinancialSubmissionDecidedBy", fields: [decidedById], references: [id])
+  decidedBy      User?                     @relation("FinancialSubmissionDecidedBy", fields: [decidedById], references: [id])
   archivedAt     DateTime?
   archivedById   String?
-  archivedBy     User?    @relation("FinancialSubmissionArchiver", fields: [archivedById], references: [id])
+  archivedBy     User?                     @relation("FinancialSubmissionArchiver", fields: [archivedById], references: [id])
   createdById    String
-  createdBy      User     @relation("FinancialSubmissionCreator", fields: [createdById], references: [id])
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdBy      User                      @relation("FinancialSubmissionCreator", fields: [createdById], references: [id])
+  createdAt      DateTime                  @default(now())
+  updatedAt      DateTime                  @updatedAt
 
   comments FinancialComment[]
 
@@ -807,13 +813,13 @@ model FinancialSubmission {
 }
 
 model FinancialComment {
-  id           String   @id @default(cuid())
+  id           String              @id @default(cuid())
   submissionId String
   submission   FinancialSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
   authorId     String
-  author       User     @relation("FinancialCommentAuthor", fields: [authorId], references: [id])
+  author       User                @relation("FinancialCommentAuthor", fields: [authorId], references: [id])
   body         String
-  createdAt    DateTime @default(now())
+  createdAt    DateTime            @default(now())
 
   @@index([submissionId])
 }

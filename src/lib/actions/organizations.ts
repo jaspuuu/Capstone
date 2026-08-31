@@ -9,9 +9,10 @@ import { can } from "@/lib/auth/rbac";
 import { requirePermissionOrThrow, requireUser } from "@/lib/auth/guards";
 import { writeAudit } from "@/lib/audit";
 import { notifyOrgOfficers } from "@/lib/notifications";
-import { currentAcademicYear } from "@/lib/utils";
+import { currentAcademicYear, formatDateTime } from "@/lib/utils";
 import { saveAttachmentFile, deleteAttachmentFile } from "@/lib/attachments";
 import { ORG_APPLICATION_WORKFLOW } from "@/lib/workflow";
+import { orgAppRequirements, orgAppSubmissionGaps } from "@/lib/org-application";
 import type { OrgApplicationStatus, Role } from "@/generated/prisma/client";
 
 export type ActionState = { error?: string; success?: string };
@@ -435,7 +436,7 @@ function orgAppAction(transition: OrgAppTransition) {
 
     const org = await db.organization.findUnique({
       where: { id },
-      include: { college: { select: { id: true } }, advisers: true },
+      include: { college: { select: { id: true } }, advisers: true, members: { where: { isCurrent: true } } },
     });
     if (!org) return { error: "Organization not found." };
 
@@ -445,11 +446,26 @@ function orgAppAction(transition: OrgAppTransition) {
       switch (transition) {
         case "SUBMIT": {
           user = await requireOrgAppOfficer(id);
-          // An application needs its primary adviser before it can be filed.
-          const adviser = org.advisers.some((a) => a.type === "REGULAR" && a.isCurrent);
-          if (!adviser) {
+          // Required checklist before the application can be filed: a Senior
+          // Adviser (Regular) plus current-year President and Secretary must be
+          // seated. Derived from the shared registry so the card and the server
+          // gate cannot drift.
+          const ay = currentAcademicYear();
+          const officers = org.members.filter(
+            (m) => m.academicYear === ay && m.status === "ACTIVE"
+          );
+          const gaps = orgAppSubmissionGaps(
+            orgAppRequirements({
+              name: org.name,
+              description: org.description,
+              hasSeniorAdviser: org.advisers.some((a) => a.type === "REGULAR" && a.isCurrent),
+              hasPresident: officers.some((m) => m.position === "PRESIDENT"),
+              hasSecretary: officers.some((m) => m.position === "SECRETARY"),
+            })
+          );
+          if (gaps.length > 0) {
             return {
-              error: "Assign a Senior Adviser (Regular Faculty) before submitting the application.",
+              error: `Complete the application requirements before submitting: ${gaps.map((g) => g.title).join(", ")}.`,
             };
           }
           break;
@@ -581,6 +597,143 @@ export const soaApproveApplication = orgAppAction("SOA_APPROVE");
 export const conferOrgApplication = orgAppAction("CONFER");
 export const returnOrgApplication = orgAppAction("RETURN");
 export const rejectOrgApplication = orgAppAction("REJECT");
+
+// ---------------------------------------------------------------------------
+// §23 (mirrored): the organization application interview stage. Reviewers
+// schedule an interview and record its outcome without moving the application
+// out of its current workflow status — same contract as the recognition path.
+// ---------------------------------------------------------------------------
+
+const INTERVIEW_OUTCOMES = [
+  "COMPLETED",
+  "FOR_ADDITIONAL_REVIEW",
+  "PASSED",
+  "NEEDS_REVISION",
+] as const;
+
+type InterviewOutcome = (typeof INTERVIEW_OUTCOMES)[number];
+
+async function assertOrgInterviewScope(id: string) {
+  const user = await requireUser();
+  if (!can(user, "org.review")) {
+    throw new Error("Only reviewers can manage the interview stage.");
+  }
+  const org = await db.organization.findUnique({
+    where: { id },
+    include: {
+      college: { select: { id: true } },
+      advisers: { where: { type: "REGULAR", isCurrent: true } },
+    },
+  });
+  if (!org) throw new Error("Organization not found.");
+  if (!["SUBMITTED", "UNDER_REVIEW"].includes(org.applicationStatus)) {
+    throw new Error(
+      `Interviews apply only while the application is pending or under review (currently "${org.applicationStatus
+        .replaceAll("_", " ")
+        .toLowerCase()}").`
+    );
+  }
+  if (user.role === "ADVISER_REGULAR" && !org.advisers.some((a) => a.adviserId === user.id)) {
+    throw new Error("Only the assigned Senior Adviser can manage the interview for this organization.");
+  }
+  if (user.role === "DEAN" && user.collegeId && user.collegeId !== org.collegeId) {
+    throw new Error("This application belongs to another college.");
+  }
+  return { user, org };
+}
+
+export async function scheduleOrgInterview(
+  _prev: ActionState,
+  formData: FormData
+): Promise<ActionState> {
+  try {
+    const id = String(formData.get("id") ?? "");
+    const when = String(formData.get("interviewAt") ?? "");
+    const note = String(formData.get("note") ?? "").trim();
+    const { user, org } = await assertOrgInterviewScope(id);
+
+    if (!when) return { error: "Pick a date and time for the interview." };
+    const interviewAt = new Date(when);
+    if (Number.isNaN(interviewAt.getTime())) return { error: "Invalid date/time." };
+
+    await db.organization.update({
+      where: { id },
+      data: { interviewStatus: "SCHEDULED", interviewAt, interviewNotes: note || null },
+    });
+    await writeAudit({
+      userId: user.id,
+      action: "INTERVIEW_SCHEDULED",
+      entityType: "Organization",
+      entityId: id,
+      entityLabel: org.name,
+      newState: { interviewAt: interviewAt.toISOString(), note: note || undefined },
+    });
+    try {
+      await notifyOrgOfficers(id, {
+        type: "INTERVIEW_SCHEDULED",
+        title: `Interview scheduled: ${org.name}`,
+        body: `${formatDateTime(interviewAt)}${note ? ` · ${note.slice(0, 140)}` : ""}`,
+        link: `/organizations/${id}`,
+      });
+    } catch {
+      // Best-effort.
+    }
+    revalidatePath(`/organizations/${id}`);
+    revalidatePath("/organizations");
+    return { success: "Interview scheduled." };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Failed to schedule interview." };
+  }
+}
+
+export async function recordOrgInterviewOutcome(
+  _prev: ActionState,
+  formData: FormData
+): Promise<ActionState> {
+  try {
+    const id = String(formData.get("id") ?? "");
+    const outcome = String(formData.get("outcome") ?? "");
+    const note = String(formData.get("note") ?? "").trim();
+
+    if (!INTERVIEW_OUTCOMES.includes(outcome as InterviewOutcome)) {
+      return { error: "Invalid interview outcome." };
+    }
+    const outcomeKey = outcome as InterviewOutcome;
+    if (outcomeKey === "NEEDS_REVISION" && !note) {
+      return { error: "Explain what needs to be revised." };
+    }
+
+    const { user, org } = await assertOrgInterviewScope(id);
+    if (org.interviewStatus === "NOT_SCHEDULED") {
+      return { error: "Schedule the interview first." };
+    }
+
+    await db.organization.update({
+      where: { id },
+      data: { interviewStatus: outcomeKey, interviewNotes: note || org.interviewNotes },
+    });
+    const labels: Record<InterviewOutcome, string> = {
+      COMPLETED: "Interview completed",
+      FOR_ADDITIONAL_REVIEW: "Interview held — for additional review",
+      PASSED: "Interview passed",
+      NEEDS_REVISION: "Interview held — needs revision",
+    };
+    await writeAudit({
+      userId: user.id,
+      action: `INTERVIEW_${outcomeKey}`,
+      entityType: "Organization",
+      entityId: id,
+      entityLabel: org.name,
+      previousState: { interviewStatus: org.interviewStatus },
+      newState: { interviewStatus: outcomeKey, note: note || undefined },
+    });
+    revalidatePath(`/organizations/${id}`);
+    revalidatePath("/organizations");
+    return { success: labels[outcomeKey] + "." };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Failed to record outcome." };
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Advisers (two distinct positions - never merged, Â§7)

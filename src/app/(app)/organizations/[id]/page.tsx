@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import {
   Award,
   ArrowRight,
+  CalendarClock,
   CalendarDays,
   ClipboardList,
   FileStack,
@@ -21,6 +22,7 @@ import { can, orgScopeWhere } from "@/lib/auth/rbac";
 import { db } from "@/lib/db";
 import {
   ADVISER_TYPE_LABELS,
+  INTERVIEW_STATUS_META,
   MEMBER_POSITION_LABELS,
   MEMBERSHIP_STATUS_META,
   ORG_APPLICATION_STATUS_META,
@@ -29,12 +31,13 @@ import {
   RECOGNITION_STATUS_META,
 } from "@/lib/constants";
 import { deriveOrgState } from "@/lib/org-state";
-import { currentAcademicYear, formatDate, fullName } from "@/lib/utils";import { Badge, Chip } from "@/components/ui/badge";
+import { currentAcademicYear, formatDate, formatDateTime, fullName } from "@/lib/utils";import { Badge, Chip } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Alert } from "@/components/ui/alert";
 import { Field, Select, Textarea } from "@/components/ui/form";
 import { WorkflowTracker } from "@/components/ui/workflow-tracker";
+import { orgAppCompliancePct, orgAppRequirements, orgAppSubmissionGaps } from "@/lib/org-application";
 import { ActionForm, QuickActionForm } from "@/components/action-form";
 import {
   addMember,
@@ -55,6 +58,8 @@ import {
   conferOrgApplication,
   returnOrgApplication,
   rejectOrgApplication,
+  scheduleOrgInterview,
+  recordOrgInterviewOutcome,
 } from "@/lib/actions/organizations";
 import { MemberPicker } from "@/app/(app)/organizations/[id]/member-picker";
 export const instant = false;
@@ -155,6 +160,32 @@ export default async function OrganizationDetailPage({
     (appReviewerRole === "OSAS" && user.role === "OSAS");
   const canOfficerEdit =
     !isEstablished && (org.applicationStatus === "DRAFT" || org.applicationStatus === "RETURNED");
+
+  // §official process: derived organization-application requirements checklist.
+  // Same registry the SUBMIT server action enforces, so card and gate cannot drift.
+  const appRequirements = orgAppRequirements({
+    name: org.name,
+    description: org.description,
+    hasSeniorAdviser,
+    hasPresident: Boolean(president),
+    hasSecretary: currentMembers.some(
+      (m) => m.position === "SECRETARY" && ["ACTIVE", "APPROVED"].includes(m.status)
+    ),
+  });
+  const reqPct = orgAppCompliancePct(appRequirements);
+  const reqGaps = orgAppSubmissionGaps(appRequirements);
+
+  // §23 mirror: interview stage of the organization application.
+  const interviewRelevant = ["SUBMITTED", "UNDER_REVIEW"].includes(org.applicationStatus);
+  const interviewerInScope =
+    user.role !== "ADVISER_REGULAR" ||
+    currentAdvisers.some((a) => a.type === "REGULAR" && a.isCurrent && a.adviserId === user.id);
+  const canInterviewHere =
+    !isEstablished &&
+    interviewRelevant &&
+    can(user, "org.review") &&
+    interviewerInScope &&
+    !(user.role === "DEAN" && user.collegeId && user.collegeId !== org.collegeId);
 
   const [adviserPool, studentPool] = canManage
     ? await Promise.all([
@@ -351,6 +382,44 @@ export default async function OrganizationDetailPage({
               />
               <CardContent className="space-y-4">
                 <WorkflowTracker process="ORG_APPLICATION" status={org.applicationStatus} />
+
+                {/* §official process: derived requirements checklist */}
+                <div className="rounded-lg border border-line bg-surface-secondary/60 p-3">
+                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-content-secondary">
+                      Application requirements
+                    </p>
+                    <span className="text-xs font-semibold text-content">
+                      {appRequirements.filter((r) => r.met).length}/{appRequirements.length} · {reqPct}%
+                    </span>
+                  </div>
+                  <div className="mb-3 h-1.5 overflow-hidden rounded-full bg-line">
+                    <div
+                      className="h-full rounded-full bg-primary transition-all"
+                      style={{ width: `${reqPct}%` }}
+                    />
+                  </div>
+                  <ul className="space-y-1.5">
+                    {appRequirements.map((r) => (
+                      <li
+                        key={r.key}
+                        className="flex flex-wrap items-center justify-between gap-2 text-sm"
+                      >
+                        <span className="font-medium text-content-secondary">{r.title}</span>
+                        <Badge tone={r.met ? "success" : "danger"}>
+                          {r.met ? "Complete" : "Missing"}
+                        </Badge>
+                      </li>
+                    ))}
+                  </ul>
+                  {reqGaps.length > 0 && (
+                    <p className="mt-2 text-xs font-medium text-warning">
+                      Submission is blocked until{" "}
+                      {reqGaps.length === 1 ? "this requirement" : "these requirements"} are met.
+                    </p>
+                  )}
+                </div>
+
                 {org.applicationStatus === "RETURNED" || org.applicationStatus === "REJECTED" ? (
                   <Alert
                     tone={org.applicationStatus === "REJECTED" ? "danger" : "warning"}
@@ -365,6 +434,30 @@ export default async function OrganizationDetailPage({
                       : "The reviewer did not leave a note."}
                   </Alert>
                 ) : null}
+
+                {org.applicationStatus === "RETURNED" && (
+                  <div className="rounded-lg border border-warning/30 bg-warning-light/40 p-3">
+                    <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-warning">
+                      Follow-up required
+                    </p>
+                    <ul className="space-y-1">
+                      {appRequirements
+                        .filter((r) => !r.met)
+                        .map((r) => (
+                          <li key={r.key} className="flex items-center gap-2 text-sm">
+                            <Badge tone="danger">Missing</Badge>
+                            <span className="font-medium text-content">{r.title}</span>
+                          </li>
+                        ))}
+                    </ul>
+                    {appRequirements.every((r) => r.met) && (
+                      <p className="text-sm text-content-secondary">
+                        All application requirements are on file — address the reviewer remarks
+                        above and resubmit.
+                      </p>
+                    )}
+                  </div>
+                )}
 
                 {/* President / Secretary — complete and file the application */}
                 {isOfficer && canOfficerEdit && (
@@ -384,12 +477,6 @@ export default async function OrganizationDetailPage({
                     >
                       <input type="hidden" name="id" value={org.id} />
                     </ActionForm>
-                    {org.applicationStatus === "DRAFT" && !hasSeniorAdviser && (
-                      <p className="w-full text-xs font-medium text-warning">
-                        Assign a Senior Adviser first — the application cannot be submitted until a
-                        Regular Faculty adviser is assigned.
-                      </p>
-                    )}
                   </div>
                 )}
 
@@ -498,6 +585,102 @@ export default async function OrganizationDetailPage({
                       </details>
                     </div>
                   </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* §23 mirror: interview stage of the organization application */}
+          {!isEstablished && (canInterviewHere || org.interviewStatus !== "NOT_SCHEDULED") && (
+            <Card>
+              <CardHeader
+                icon={CalendarClock}
+                title="Interview"
+                description="A distinct stage of the review — scheduling and outcome are tracked here."
+              />
+              <CardContent className="space-y-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge tone={INTERVIEW_STATUS_META[org.interviewStatus].tone}>
+                    {INTERVIEW_STATUS_META[org.interviewStatus].label}
+                  </Badge>
+                  {org.interviewAt && (
+                    <span className="text-sm font-medium text-content">
+                      {formatDateTime(org.interviewAt)}
+                    </span>
+                  )}
+                </div>
+                {org.interviewNotes && (
+                  <p className="rounded-lg bg-surface-secondary px-3 py-2 text-sm whitespace-pre-wrap text-content-secondary">
+                    {org.interviewNotes}
+                  </p>
+                )}
+
+                {canInterviewHere && org.interviewStatus === "NOT_SCHEDULED" && (
+                  <ActionForm
+                    action={scheduleOrgInterview}
+                    submitLabel="Schedule interview"
+                    variant="outline"
+                    footerClassName="mt-3"
+                    className="space-y-3"
+                  >
+                    <input type="hidden" name="id" value={org.id} />
+                    <Field label="Date & time" htmlFor="org-interview-at" required>
+                      <input
+                        id="org-interview-at"
+                        name="interviewAt"
+                        type="datetime-local"
+                        required
+                        className="h-10 rounded-lg border border-line-strong bg-surface px-3 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/15"
+                      />
+                    </Field>
+                    <Field label="Instructions / venue (optional)" htmlFor="org-interview-note">
+                      <Textarea
+                        id="org-interview-note"
+                        name="note"
+                        rows={2}
+                        maxLength={500}
+                        placeholder="e.g. OSAS conference room…"
+                      />
+                    </Field>
+                  </ActionForm>
+                )}
+
+                {canInterviewHere && org.interviewStatus !== "NOT_SCHEDULED" && (
+                  <ActionForm
+                    action={recordOrgInterviewOutcome}
+                    submitLabel="Record outcome"
+                    variant="outline"
+                    footerClassName="mt-3"
+                    className="space-y-3"
+                  >
+                    <input type="hidden" name="id" value={org.id} />
+                    <Field label="Outcome" htmlFor="org-interview-outcome" required>
+                      <select
+                        id="org-interview-outcome"
+                        name="outcome"
+                        required
+                        defaultValue=""
+                        className="h-10 rounded-lg border border-line-strong bg-surface px-3 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/15"
+                      >
+                        <option value="" disabled>
+                          Select the result of the interview…
+                        </option>
+                        <option value="COMPLETED">Completed — proceed with review</option>
+                        <option value="PASSED">Passed</option>
+                        <option value="FOR_ADDITIONAL_REVIEW">For additional review</option>
+                        <option value="NEEDS_REVISION">Needs revision</option>
+                      </select>
+                    </Field>
+                    <Field label="Findings (required when needs revision)" htmlFor="org-interview-findings">
+                      <Textarea
+                        id="org-interview-findings"
+                        name="note"
+                        rows={3}
+                        maxLength={1000}
+                        placeholder="Recording the outcome requires a note when the application needs revision."
+                      />
+                    </Field>
+                  </ActionForm>
                 )}
               </CardContent>
             </Card>
