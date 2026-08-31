@@ -76,6 +76,7 @@ export default async function OrgAnalyticsPage({
         expectedParticipants: true,
         _count: { select: { attendanceRecords: true } },
         report: { select: { status: true, actualParticipants: true, actualBudget: true } },
+        monitoring: { select: { status: true, reason: true } },
       },
     }),
     db.deadline.findMany({
@@ -125,6 +126,8 @@ export default async function OrgAnalyticsPage({
       reportStatus: a.report?.status ?? null,
       actualParticipants: a.report?.actualParticipants ?? null,
       actualBudget: a.report?.actualBudget ?? null,
+      monitoringStatus: a.monitoring?.status ?? null,
+      monitoringReason: a.monitoring?.reason ?? null,
     })),
     reports: reportRows,
     requirementFiles: recognitionRows.flatMap((r) =>
@@ -157,6 +160,8 @@ export default async function OrgAnalyticsPage({
       actualParticipants: a.report?.actualParticipants ?? null,
       attendanceCount: a._count.attendanceRecords,
       reportStatus: a.report?.status ?? null,
+      monitoringStatus: a.monitoring?.status ?? null,
+      monitoringReason: a.monitoring?.reason ?? null,
     })),
     now
   );

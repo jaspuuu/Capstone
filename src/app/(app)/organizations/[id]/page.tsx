@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
+  Activity as ActivityLine,
   Award,
   ArrowRight,
   CalendarClock,
@@ -277,6 +278,13 @@ export default async function OrganizationDetailPage({
           >
             <FileStack className="size-4" aria-hidden />
             Documents
+          </Link>
+          <Link
+            href={`/organizations/${org.id}/monitoring`}
+            className="inline-flex h-10 items-center gap-2 rounded-lg border border-line-strong bg-surface px-4 text-sm font-semibold text-content hover:border-primary"
+          >
+            <ActivityLine className="size-4" aria-hidden />
+            Activity monitoring
           </Link>
           <Link
             href={`/organizations/${org.id}/financial`}

@@ -64,6 +64,7 @@ model User {
   decidedRecognitions          Recognition[]          @relation("RecognitionDecidedBy")
   decidedProposals             ActivityProposal[]     @relation("ProposalDecidedBy")
   decidedReports               AccomplishmentReport[] @relation("ReportDecidedBy")
+  updatedMonitoring            ActivityMonitoring[]   @relation("MonitoringUpdatedBy")
   createdDeadlines             Deadline[]             @relation("DeadlineCreator")
   uploadedAttachments          Attachment[]           @relation("AttachmentUploader")
   notifications                Notification[]         @relation("NotificationRecipient")
@@ -381,6 +382,15 @@ enum ActivityPhase {
   ARCHIVE
 }
 
+// Monitoring & evaluation outcome (M&E). RECORDED after the activity window
+// passes; IMPLEMENTED is the single status that unlocks an accomplishment
+// report for the activity.
+enum MonitoringStatus {
+  IMPLEMENTED
+  NOT_IMPLEMENTED
+  RESCHEDULED
+}
+
 model ActivityProposal {
   id                   String         @id @default(cuid())
   organizationId       String
@@ -409,6 +419,7 @@ model ActivityProposal {
   attendanceRecords ActivityAttendance[]
   checkIn           ActivityCheckIn?
   evaluation        ActivityEvaluation?
+  monitoring        ActivityMonitoring?
 
   @@index([organizationId])
   @@index([status])
@@ -488,6 +499,36 @@ model ActivityEvaluation {
   @@index([activityId])
 }
 
+// ---------------------------------------------------------------------------
+// M&E outcome record. One row per activity (1:1), captured after the planned
+// window. RESCHEDULED keeps the original startAt untouched; the new date and
+// the full change history are preserved here.
+// ---------------------------------------------------------------------------
+
+model ActivityMonitoring {
+  id                  String           @id @default(cuid())
+  activityId          String           @unique
+  activity            ActivityProposal @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  status              MonitoringStatus @default(NOT_IMPLEMENTED)
+  // Required for NOT_IMPLEMENTED and RESCHEDULED; optional otherwise.
+  reason              String?
+  // New target date when RESCHEDULED (original startAt is never overwritten).
+  rescheduledTo       DateTime?
+  // Optional "responsible person" note (member/officer/adviser) left free-form.
+  responsibleNote     String?
+  // Persistent snapshot of the selected responsible member/adviser ids.
+  responsibleMemberIds Json?
+  // Ordered history of reschedules: [{from, to, reason, at}].
+  rescheduleHistory   Json?
+  updatedById         String
+  updatedBy           User             @relation("MonitoringUpdatedBy", fields: [updatedById], references: [id])
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  @@index([status])
+  @@index([activityId, status])
+}
+
 enum ReportStatus {
   DRAFT
   SUBMITTED
@@ -507,8 +548,12 @@ model AccomplishmentReport {
   title              String
   narrative          String
   heldOn             DateTime
+  duration           String?
+  location           String?
+  conductedBy        String?
   actualParticipants Int?
   actualBudget       Float?
+  budgetRemarks      String?
   status             ReportStatus      @default(DRAFT)
   submittedAt        DateTime?
   reviewedAt         DateTime?
@@ -518,10 +563,29 @@ model AccomplishmentReport {
   createdAt          DateTime          @default(now())
   updatedAt          DateTime          @updatedAt
 
+  participants ReportParticipant[]
+
   @@index([organizationId])
   @@index([status])
   @@index([academicYear])
   @@index([organizationId, academicYear])
+}
+
+// Roster of who actually took part, snapshot at report time so it survives
+// later membership churn. isOfficer marks the President/Secretary board rows.
+model ReportParticipant {
+  id            String               @id @default(cuid())
+  reportId      String
+  report        AccomplishmentReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  // Nullable: unplanned reports may record participants by name only.
+  memberId      String?
+  name          String
+  positionLabel String?
+  isOfficer     Boolean              @default(false)
+  sortOrder     Int                  @default(0)
+  createdAt     DateTime             @default(now())
+
+  @@index([reportId])
 }
 
 // ---------------------------------------------------------------------------

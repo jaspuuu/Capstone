@@ -36,6 +36,8 @@ export type AnalyticsActivity = {
   reportStatus: string | null;
   actualParticipants: number | null;
   actualBudget: number | null;
+  monitoringStatus: string | null;
+  monitoringReason: string | null;
 };
 
 export type AnalyticsOrg = {
@@ -70,6 +72,8 @@ export type AnalyticsOrg = {
     reportStatus: string | null;
     actualParticipants: number | null;
     actualBudget: number | null;
+    monitoringStatus: string | null;
+    monitoringReason: string | null;
   }[];
   requirementFiles: { kind: AttachmentKind; academicYear: string; createdAt: Date }[];
   financialSubmissions: { academicYear: string; status: string }[];
@@ -174,6 +178,7 @@ export async function buildAnalyticsSnapshot(
         estimatedBudget: true,
         _count: { select: { attendanceRecords: true } },
         report: { select: { status: true, actualParticipants: true, actualBudget: true } },
+        monitoring: { select: { status: true, reason: true } },
       },
     }),
     db.financialSubmission.findMany({
@@ -227,6 +232,8 @@ export async function buildAnalyticsSnapshot(
       reportStatus: a.report?.status ?? null,
       actualParticipants: a.report?.actualParticipants ?? null,
       actualBudget: a.report?.actualBudget ?? null,
+      monitoringStatus: a.monitoring?.status ?? null,
+      monitoringReason: a.monitoring?.reason ?? null,
     });
     actsByOrg.set(a.organizationId, list);
   }

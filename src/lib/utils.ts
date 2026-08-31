@@ -58,6 +58,14 @@ export function compareAcademicYear(a: string, b: string): number {
   return aStart - bStart;
 }
 
+/**
+ * Semester of a date. 1st semester = June–December, 2nd = January–May
+ * (Philippine academic calendar), derived from the month only.
+ */
+export function semesterOf(d: Date | string): 1 | 2 {
+  return new Date(d).getMonth() >= 5 ? 1 : 2;
+}
+
 export function timeUntil(d: Date | string) {
   const diff = new Date(d).getTime() - Date.now();
   const abs = Math.abs(diff);

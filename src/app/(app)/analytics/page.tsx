@@ -226,6 +226,8 @@ export default async function AnalyticsPage({
           actualParticipants: a.actualParticipants,
           attendanceCount: a.attendanceCount,
           reportStatus: a.reportStatus,
+          monitoringStatus: a.monitoringStatus,
+          monitoringReason: a.monitoringReason,
         })),
       now
     )
@@ -244,6 +246,18 @@ export default async function AnalyticsPage({
     .sort((a, b) => b.value - a.value);
   const attendanceHighest = origByRate[0];
   const attendanceLowest = origByRate[origByRate.length - 1];
+
+  // ---- M&E implementation rates ------------------------------------------------
+  const allApprovedActivities = monitored.flatMap((m) =>
+    m.activities.filter((a) => a.status === "APPROVED")
+  );
+  const meStats = {
+    total: allApprovedActivities.length,
+    implemented: allApprovedActivities.filter((a) => a.monitoringStatus === "IMPLEMENTED").length,
+    notImplemented: allApprovedActivities.filter((a) => a.monitoringStatus === "NOT_IMPLEMENTED").length,
+    rescheduled: allApprovedActivities.filter((a) => a.monitoringStatus === "RESCHEDULED").length,
+    pending: allApprovedActivities.filter((a) => !a.monitoringStatus).length,
+  };
 
   // ---- Layers 4 & 5: alerts + recommendations ----------------------------------
   const risks = assessRisk(orgs, deadlines, collegeIdByOrg);
@@ -419,6 +433,7 @@ export default async function AnalyticsPage({
               origByRate,
               realEval,
               evaluations,
+              meStats,
             }}
             alerts={{ alerts, priority }}
             integrity={{ dataIssues, ay }}

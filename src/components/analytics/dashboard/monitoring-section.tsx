@@ -1,4 +1,4 @@
-import { Activity, Award, Flag, ListChecks, ShieldAlert, Users } from "lucide-react";
+import { Activity, Award, CheckCircle2, Clock, Flag, ListChecks, ShieldAlert, Users, XCircle } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { BarChart } from "@/components/ui/charts";
 import { StatCard } from "@/components/ui/stat-card";
@@ -17,6 +17,7 @@ export type AnalyticsMonitoringProps = {
   origByRate: { label: string; value: number }[];
   realEval: EvaluationStats;
   evaluations: { activity: { organizationId: string } }[];
+  meStats?: { implemented: number; notImplemented: number; rescheduled: number; pending: number; total: number };
 };
 
 export function AnalyticsMonitoring(p: AnalyticsMonitoringProps) {
@@ -24,7 +25,7 @@ export function AnalyticsMonitoring(p: AnalyticsMonitoringProps) {
   const loaded = p.realEval.count > 0 || fallback.loaded;
 
   return (
-    <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
+    <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
       <Card>
         <CardHeader title="Attendance analytics" description="From recorded attendance — registered vs actual, not a score." />
         <CardContent>
@@ -78,6 +79,49 @@ export function AnalyticsMonitoring(p: AnalyticsMonitoringProps) {
           )}
           {p.monitored.reduce((s, m) => s + m.budgetPlanned, 0) > 0 && (
             <BudgetUtilizationBar monitored={p.monitored} />
+          )}
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader
+          title="Implementation status"
+          description="Activity monitoring outcomes recorded by organizations. Activities must be marked Implemented before their accomplishment report can be filed."
+        />
+        <CardContent>
+          {p.meStats && p.meStats.total > 0 ? (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <StatCard label="Implemented" value={p.meStats.implemented} icon={CheckCircle2} iconTone="success" hint={`${p.meStats.total > 0 ? Math.round((p.meStats.implemented / p.meStats.total) * 100) : 0}% rate`} />
+                <StatCard label="Not implemented" value={p.meStats.notImplemented} icon={XCircle} iconTone="danger" />
+                <StatCard label="Rescheduled" value={p.meStats.rescheduled} icon={Clock} iconTone="warning" />
+                <StatCard label="Pending" value={p.meStats.pending} icon={Activity} iconTone="info" hint="no outcome recorded yet" />
+              </div>
+              {p.meStats.total > 0 && (
+                <div className="rounded-xl border border-line px-4 py-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-semibold text-content">Implementation rate</p>
+                    <span className="text-lg font-bold tabular-nums text-success">
+                      {Math.round((p.meStats.implemented / p.meStats.total) * 100)}%
+                    </span>
+                  </div>
+                  <div
+                    className="mt-2 h-2 overflow-hidden rounded-full bg-surface-secondary"
+                    role="meter"
+                    aria-valuenow={Math.round((p.meStats.implemented / p.meStats.total) * 100)}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-label={`Implementation rate ${Math.round((p.meStats.implemented / p.meStats.total) * 100)}%`}
+                  >
+                    <div
+                      className="h-full rounded-full bg-success"
+                      style={{ width: `${Math.round((p.meStats.implemented / p.meStats.total) * 100)}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <NoData what="No activity monitoring outcomes recorded yet." />
           )}
         </CardContent>
       </Card>

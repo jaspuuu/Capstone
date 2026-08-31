@@ -138,6 +138,19 @@ export const REPORT_STATUS_META: Record<string, StatusMeta> = {
   RETURNED: { label: "Returned", tone: "orange" },
 };
 
+/** §24 M&E outcome recorded for an approved activity. */
+export const MONITORING_STATUS_META: Record<string, StatusMeta> = {
+  IMPLEMENTED: { label: "Implemented", tone: "success" },
+  NOT_IMPLEMENTED: { label: "Not implemented", tone: "danger" },
+  RESCHEDULED: { label: "Rescheduled", tone: "warning" },
+};
+
+/** Semester tabs on the monitoring board (§24). 1st = Jun–Dec, 2nd = Jan–May. */
+export const SEMESTER_LABELS: Record<1 | 2, string> = {
+  1: "1st Semester (Jun – Dec)",
+  2: "2nd Semester (Jan – May)",
+};
+
 export const ACTIVITY_SCOPE_LABELS: Record<string, string> = {
   ORGANIZATION: "Organization-wide",
   COLLEGE: "College-wide",
@@ -232,6 +245,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   ATTENDANCE_CHECKIN: "QR check-in",
   CHECKIN_OPENED: "Opened check-in",
   CHECKIN_CLOSED: "Closed check-in",
+  MONITORING_UPDATED: "Updated activity monitoring",
 };
 
 // ---------------------------------------------------------------------------

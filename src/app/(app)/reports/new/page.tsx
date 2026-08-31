@@ -4,6 +4,7 @@ import { ArrowLeft } from "lucide-react";
 import { requirePermission, requireUser } from "@/lib/auth/guards";
 import { db } from "@/lib/db";
 import { filingOrganizations } from "@/lib/filing";
+import { participantsByOrganization } from "@/lib/organization-participants";
 import { createReport } from "@/lib/actions/reports";
 import { currentAcademicYear } from "@/lib/utils";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -23,16 +24,20 @@ export default async function NewReportPage({
   const sp = await searchParams;
   const organizations = await filingOrganizations(user);
 
-  // Approved proposals without reports, for the optional link dropdown.
+  // Approved proposals without reports whose M&E is marked Implemented (§24:
+  // the strict gate), for the optional link dropdown.
   const proposals = await db.activityProposal.findMany({
     where: {
       status: "APPROVED",
       report: null,
+      monitoring: { status: "IMPLEMENTED" },
       academicYear: currentAcademicYear(),
     },
     include: { organization: { select: { acronym: true, name: true } } },
     orderBy: { startAt: "desc" },
   });
+
+  const orgMembers = await participantsByOrganization(organizations.map((o) => o.id));
 
   // Prefill from the activity page's "File report" link when present.
   const prefillProposal = sp.proposal
@@ -67,6 +72,7 @@ export default async function NewReportPage({
               label: `${p.title} — ${p.organization.acronym ?? p.organization.name}`,
               organizationId: p.organizationId,
             }))}
+            orgMembers={orgMembers}
             initial={
               prefillProposal
                 ? {

@@ -64,6 +64,7 @@ export default async function ReportDetailPage({
         },
       },
       decidedBy: { select: { firstName: true, lastName: true } },
+      participants: { orderBy: [{ isOfficer: "desc" }, { name: "asc" }] },
     },
   });
   if (!report) notFound();
@@ -297,6 +298,18 @@ export default async function ReportDetailPage({
                   <dd className="text-content">{formatDate(report.heldOn)}</dd>
                 </div>
                 <div className="flex justify-between gap-4 sm:block">
+                  <dt className="text-content-secondary">Duration</dt>
+                  <dd className="text-content">{report.duration ?? "—"}</dd>
+                </div>
+                <div className="flex justify-between gap-4 sm:block">
+                  <dt className="text-content-secondary">Venue / location</dt>
+                  <dd className="text-content">{report.location ?? "—"}</dd>
+                </div>
+                <div className="flex justify-between gap-4 sm:block">
+                  <dt className="text-content-secondary">Conducted by</dt>
+                  <dd className="text-content">{report.conductedBy ?? "—"}</dd>
+                </div>
+                <div className="flex justify-between gap-4 sm:block">
                   <dt className="text-content-secondary">Actual participants</dt>
                   <dd className="tabular-nums text-content">{report.actualParticipants ?? "—"}</dd>
                 </div>
@@ -306,6 +319,12 @@ export default async function ReportDetailPage({
                     {report.actualBudget != null ? formatMoney(report.actualBudget) : "—"}
                   </dd>
                 </div>
+                {report.budgetRemarks && (
+                  <div className="flex justify-between gap-4 sm:block sm:col-span-2">
+                    <dt className="text-content-secondary">Budget remarks</dt>
+                    <dd className="text-content">{report.budgetRemarks}</dd>
+                  </div>
+                )}
                 <div className="flex justify-between gap-4 sm:block">
                   <dt className="text-content-secondary">Linked proposal</dt>
                   <dd className="text-content">
@@ -332,6 +351,28 @@ export default async function ReportDetailPage({
                   </div>
                 )}
               </dl>
+              {report.participants.length > 0 && (
+                <div className="mt-4 border-t border-line pt-4">
+                  <h3 className="mb-1.5 text-xs font-bold tracking-wide text-content-secondary uppercase">
+                    Participants ({report.participants.length})
+                  </h3>
+                  <ul className="flex flex-wrap gap-2">
+                    {report.participants.map((p) => (
+                      <li
+                        key={p.id}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-2.5 py-1 text-xs text-content"
+                      >
+                        {p.name}
+                        {p.isOfficer && (
+                          <span className="rounded bg-gold/15 px-1 py-0.5 text-[10px] font-semibold text-gold-dark">
+                            Officer
+                          </span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               <div className="mt-4 border-t border-line pt-4">
                 <h3 className="mb-1.5 text-xs font-bold tracking-wide text-content-secondary uppercase">
                   Narrative

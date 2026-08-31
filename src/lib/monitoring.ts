@@ -32,6 +32,8 @@ export type MonitoredActivity = {
   actualParticipants: number | null;
   attendanceCount: number;
   reportStatus: string | null;
+  monitoringStatus?: string | null;
+  monitoringReason?: string | null;
 };
 
 export type OrgMonitoring = {

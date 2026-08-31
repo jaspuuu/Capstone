@@ -7,6 +7,7 @@ import { can } from "@/lib/auth/rbac";
 import { db } from "@/lib/db";
 import { filingOrganizations } from "@/lib/filing";
 import { currentAcademicYear } from "@/lib/utils";
+import { participantsByOrganization } from "@/lib/organization-participants";
 import { updateReport } from "@/lib/actions/reports";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
@@ -29,9 +30,10 @@ export default async function EditReportPage({
     include: {
       organization: {
         include: {
-          members: { where: { isCurrent: true }, select: { userId: true, position: true } },
+          members: { where: { isCurrent: true }, select: { id: true, userId: true, position: true } },
         },
       },
+      participants: { orderBy: [{ isOfficer: "desc" }, { name: "asc" }] },
     },
   });
   if (!report) notFound();
@@ -55,17 +57,31 @@ export default async function EditReportPage({
       })
     : null;
 
-  // Approved proposals without reports — include the currently linked one so
-  // the selection stays valid while editing.
+  // Approved proposals without reports whose M&E is Implemented — include the
+  // currently linked one so the selection stays valid while editing.
   const proposals = await db.activityProposal.findMany({
     where: {
       status: "APPROVED",
       academicYear: currentAcademicYear(),
-      OR: [{ report: null }, { id: report.activityProposalId ?? "" }],
+      OR: [
+        { report: null, monitoring: { status: "IMPLEMENTED" } },
+        { id: report.activityProposalId ?? "" },
+      ],
     },
     include: { organization: { select: { acronym: true, name: true } } },
     orderBy: { startAt: "desc" },
   });
+
+  const orgMembers = await participantsByOrganization([report.organizationId]);
+
+  // Report participants snapshot member ids; map back to user ids so the
+  // picker can pre-check rows that are still current members.
+  const memberIdToUserId = new Map(
+    report.organization.members.map((m) => [m.id, m.userId] as const)
+  );
+  const initialParticipantIds = report.participants
+    .map((p) => memberIdToUserId.get(p.memberId ?? "") ?? "")
+    .filter(Boolean);
 
   return (
     <div className="mx-auto max-w-2xl">
@@ -95,6 +111,8 @@ export default async function EditReportPage({
               label: `${p.title} — ${p.organization.acronym ?? p.organization.name}`,
               organizationId: p.organizationId,
             }))}
+            orgMembers={orgMembers}
+            initialParticipantIds={initialParticipantIds}
             initial={{
               id: report.id,
               organizationId: report.organizationId,
@@ -102,8 +120,12 @@ export default async function EditReportPage({
               title: report.title,
               narrative: report.narrative,
               heldOn: report.heldOn,
+              duration: report.duration,
+              location: report.location,
+              conductedBy: report.conductedBy,
               actualParticipants: report.actualParticipants,
               actualBudget: report.actualBudget,
+              budgetRemarks: report.budgetRemarks,
               expectedParticipants: linked?.expectedParticipants ?? null,
             }}
             submitLabel="Save changes"

@@ -10,6 +10,7 @@ import { can } from "@/lib/auth/rbac";
 import { writeAudit } from "@/lib/audit";
 import { notifyOrgOfficers } from "@/lib/notifications";
 import { currentAcademicYear } from "@/lib/utils";
+import { MEMBER_POSITION_LABELS } from "@/lib/constants";
 import { REPORT_WORKFLOW } from "@/lib/workflow";
 
 export type ActionState = { error?: string; success?: string };
@@ -46,8 +47,12 @@ const baseSchema = z.object({
     .min(20, "Summarize the activity in at least 20 characters.")
     .max(8000),
   heldOn: z.string().min(1, "The date of the activity is required."),
+  duration: z.string().trim().max(100).optional().or(z.literal("")),
+  location: z.string().trim().max(200).optional().or(z.literal("")),
+  conductedBy: z.string().trim().max(200).optional().or(z.literal("")),
   actualParticipants: z.coerce.number().int().min(0).max(100_000).optional(),
   actualBudget: z.coerce.number().min(0).max(100_000_000).optional(),
+  budgetRemarks: z.string().trim().max(1000).optional().or(z.literal("")),
 });
 
 function parseForm(formData: FormData) {
@@ -57,9 +62,41 @@ function parseForm(formData: FormData) {
     title: formData.get("title"),
     narrative: formData.get("narrative"),
     heldOn: formData.get("heldOn"),
+    duration: formData.get("duration") || "",
+    location: formData.get("location") || "",
+    conductedBy: formData.get("conductedBy") || "",
     actualParticipants: formData.get("actualParticipants") || undefined,
     actualBudget: formData.get("actualBudget") || undefined,
+    budgetRemarks: formData.get("budgetRemarks") || "",
   });
+}
+
+/**
+ * Snapshot the selected current members as report participants. Only ids that
+ * belong to the report organization's current roster are kept, so a tampered
+ * form cannot reference strangers; PRESIDENT/SECRETARY rows are flagged.
+ */
+async function participantSnapshot(organizationId: string, selectedIds: string[]) {
+  if (selectedIds.length === 0) return [];
+  const roster = await db.organizationMember.findMany({
+    where: { organizationId, isCurrent: true },
+    include: { user: { select: { firstName: true, lastName: true } } },
+  });
+  const byId = new Map(roster.map((m) => [m.userId, m]));
+  const isOfficer = (p: string | null) => p === "PRESIDENT" || p === "SECRETARY";
+  const picked = selectedIds
+    .filter((id) => byId.has(id))
+    .map((id) => {
+      const m = byId.get(id)!;
+      return {
+        memberId: m.id,
+        name: `${m.user.firstName} ${m.user.lastName}`.trim(),
+        positionLabel: isOfficer(m.position) ? MEMBER_POSITION_LABELS[m.position] ?? null : null,
+        isOfficer: isOfficer(m.position),
+      };
+    });
+  picked.sort((a, b) => Number(b.isOfficer) - Number(a.isOfficer));
+  return picked;
 }
 
 /** Reject a held-on date still in the future (e.g. typo or pre-filed report). */
@@ -99,12 +136,16 @@ export async function createReport(_prev: ActionState, formData: FormData): Prom
     if (!membership) return { error: "Only officers of the organization can file reports." };
   }
 
-  // A linked proposal must belong to the same organization and be approved.
+  // A linked proposal must belong to the same organization, be approved, and
+  // have its M&E outcome recorded as implemented (§24 enforcement).
   let proposalLink: string | null = null;
   if (d.activityProposalId) {
     const proposal = await db.activityProposal.findUnique({
       where: { id: d.activityProposalId },
-      include: { report: { select: { id: true } } },
+      include: {
+        report: { select: { id: true } },
+        monitoring: { select: { status: true } },
+      },
     });
     if (!proposal || proposal.organizationId !== d.organizationId) {
       return { error: "The selected activity proposal does not belong to this organization." };
@@ -115,8 +156,19 @@ export async function createReport(_prev: ActionState, formData: FormData): Prom
     if (proposal.report) {
       return { error: "That proposal already has an accomplishment report." };
     }
+    if (proposal.monitoring?.status !== "IMPLEMENTED") {
+      return {
+        error:
+          "The activity's monitoring outcome must be marked \"Implemented\" before its accomplishment report can be filed.",
+      };
+    }
     proposalLink = proposal.id;
   }
+
+  const participantIds = formData.getAll("participantIds").map(String).filter(Boolean);
+  const participants = await participantSnapshot(d.organizationId, participantIds);
+  const autoParticipants =
+    participants.length > 0 && d.actualParticipants == null ? participants.length : undefined;
 
   try {
     const report = await db.accomplishmentReport.create({
@@ -127,8 +179,13 @@ export async function createReport(_prev: ActionState, formData: FormData): Prom
         title: d.title,
         narrative: d.narrative,
         heldOn: new Date(d.heldOn),
-        actualParticipants: d.actualParticipants ?? null,
+        duration: d.duration || null,
+        location: d.location || null,
+        conductedBy: d.conductedBy || null,
+        actualParticipants: d.actualParticipants ?? autoParticipants ?? null,
         actualBudget: d.actualBudget ?? null,
+        budgetRemarks: d.budgetRemarks || null,
+        participants: participants.length > 0 ? { create: participants } : undefined,
       },
     });
     await writeAudit({
@@ -170,16 +227,31 @@ export async function updateReport(_prev: ActionState, formData: FormData): Prom
     return { error: "Only officers of the organization can edit this report." };
   }
 
-  // The linked proposal cannot be changed to one from another organization.
+  // The linked proposal cannot be changed to one from another organization,
+  // and the new link must still honor the M&E "Implemented" gate.
   if (d.activityProposalId && d.activityProposalId !== report.activityProposalId) {
     const proposal = await db.activityProposal.findUnique({
       where: { id: d.activityProposalId },
-      include: { report: { select: { id: true } } },
+      include: {
+        report: { select: { id: true } },
+        monitoring: { select: { status: true } },
+      },
     });
     if (!proposal || proposal.organizationId !== d.organizationId || proposal.status !== "APPROVED" || proposal.report) {
       return { error: "That activity proposal cannot be linked to this report." };
     }
+    if (proposal.monitoring?.status !== "IMPLEMENTED") {
+      return {
+        error:
+          "The activity's monitoring outcome must be marked \"Implemented\" before its accomplishment report can be filed.",
+      };
+    }
   }
+
+  const participantIds = formData.getAll("participantIds").map(String).filter(Boolean);
+  const participants = await participantSnapshot(d.organizationId, participantIds);
+  const autoParticipants =
+    participants.length > 0 && d.actualParticipants == null ? participants.length : undefined;
 
   try {
     await db.accomplishmentReport.update({
@@ -188,9 +260,14 @@ export async function updateReport(_prev: ActionState, formData: FormData): Prom
         title: d.title,
         narrative: d.narrative,
         heldOn: new Date(d.heldOn),
-        actualParticipants: d.actualParticipants ?? null,
+        duration: d.duration || null,
+        location: d.location || null,
+        conductedBy: d.conductedBy || null,
+        actualParticipants: d.actualParticipants ?? autoParticipants ?? null,
         actualBudget: d.actualBudget ?? null,
+        budgetRemarks: d.budgetRemarks || null,
         ...(d.activityProposalId ? { activityProposalId: d.activityProposalId } : {}),
+        participants: { deleteMany: {}, create: participants },
       },
     });
   } catch {

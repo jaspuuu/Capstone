@@ -5,7 +5,7 @@ import { requireUser } from "@/lib/auth/guards";
 import { can, scopedOrgWhere } from "@/lib/auth/rbac";
 import { db } from "@/lib/db";
 import { getSelectedAy } from "@/lib/ay-server";
-import { ACTIVITY_SCOPE_LABELS, PROPOSAL_STATUS_META } from "@/lib/constants";
+import { ACTIVITY_SCOPE_LABELS, MONITORING_STATUS_META, PROPOSAL_STATUS_META } from "@/lib/constants";
 import { formatDateTime } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -46,6 +46,7 @@ export default async function ActivitiesPage({
     include: {
       organization: { select: { id: true, name: true, acronym: true } },
       report: { select: { id: true } },
+      monitoring: { select: { status: true } },
     },
     orderBy: [{ startAt: "desc" }],
   });
@@ -151,13 +152,17 @@ export default async function ActivitiesPage({
                           >
                             View report
                           </Link>
-                        ) : p.status === "APPROVED" && can(user, "activity.submit") ? (
+                        ) : p.status === "APPROVED" && p.monitoring?.status === "IMPLEMENTED" && can(user, "activity.submit") ? (
                           <Link
                             href={`/reports/new?proposal=${p.id}`}
                             className="text-xs font-semibold text-primary hover:underline"
                           >
                             File report
                           </Link>
+                        ) : p.monitoring && p.status === "APPROVED" ? (
+                          <span className="text-xs font-medium text-content-secondary">
+                            {MONITORING_STATUS_META[p.monitoring.status]?.label ?? p.monitoring.status}
+                          </span>
                         ) : (
                           <span className="text-xs text-content-muted">—</span>
                         )}
