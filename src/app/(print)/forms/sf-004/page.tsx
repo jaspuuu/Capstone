@@ -7,6 +7,7 @@ import { currentAcademicYear, formatMoney } from "@/lib/utils";
 import { PrintToolbar } from "@/components/forms/editable";
 import { Sf004Sheets, type Sf004Activity } from "@/components/forms/sf004-sheets";
 import { getApproversSignatures, getSignaturesFor } from "@/lib/signatures";
+import { getSignedRolesForSf } from "@/lib/signature-routing";
 export const instant = false;
 
 export const metadata: Metadata = { title: "SF-004 · Plan of Activities" };
@@ -75,7 +76,7 @@ export default async function Sf004Page({
   const secretary = org.members.find((m) => m.position === "SECRETARY")?.user;
   const dean = org.college.dean;
   const [ayStart, ayEnd] = ay.split("-");
-  const [sigMap, approverSigs] = await Promise.all([
+  const [sigMap, approverSigs, signedRoles] = await Promise.all([
     getSignaturesFor([
       president?.id,
       secretary?.id,
@@ -83,7 +84,9 @@ export default async function Sf004Page({
       dean?.id,
     ]),
     getApproversSignatures(),
+    getSignedRolesForSf("SF004", org.id, ay),
   ]);
+  const signed = (role: string) => signedRoles.has(role);
 
   const rows: Sf004Activity[] = activities.map((a) => ({
     objective: a.objectives ?? "",
@@ -107,12 +110,12 @@ export default async function Sf004Page({
         )}
         deanName={dean ? `${dean.firstName} ${dean.lastName}` : ""}
         activities={rows}
-        presidentSig={president ? sigMap.get(president.id) ?? null : null}
-        secretarySig={secretary ? sigMap.get(secretary.id) ?? null : null}
-        adviserSigs={org.advisers.map((a) => sigMap.get(a.adviser.id) ?? null)}
-        deanSig={dean ? sigMap.get(dean.id) ?? null : null}
-        coordinatorSig={approverSigs.coordinator}
-        directorSig={approverSigs.director}
+        presidentSig={president && signed("PRESIDENT") ? sigMap.get(president.id) ?? null : null}
+        secretarySig={secretary && signed("SECRETARY") ? sigMap.get(secretary.id) ?? null : null}
+        adviserSigs={org.advisers.map((a) => (signed("SENIOR_ADVISER") ? sigMap.get(a.adviser.id) ?? null : null))}
+        deanSig={dean && signed("DEAN") ? sigMap.get(dean.id) ?? null : null}
+        coordinatorSig={signed("SOA") ? approverSigs.coordinator : null}
+        directorSig={signed("OSAS") ? approverSigs.director : null}
       />
     </>
   );

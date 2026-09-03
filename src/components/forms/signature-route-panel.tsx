@@ -76,6 +76,8 @@ export function SignatureRoutePanel({
   const [resubmitState, resubmitAction] = useActionState(resubmitRoute, EMPTY);
   const [confirming, setConfirming] = useState(false);
   const [returning, setReturning] = useState(false);
+  const [reviewed, setReviewed] = useState(false);
+  const [useSavedSig, setUseSavedSig] = useState(false);
 
   const current = route.steps.find((s) => s.status === "CURRENT");
   const done = route.state === "COMPLETED";
@@ -199,22 +201,53 @@ export function SignatureRoutePanel({
               Attach my signature
             </button>
           ) : (
-            <form action={signAction} className="space-y-2">
+            <form action={signAction} className="space-y-3">
               <input type="hidden" name="routeId" value={route.id} />
               <input type="hidden" name="confirm" value="yes" />
+              <input type="hidden" name="confirmReview" value={reviewed ? "yes" : ""} />
+              <input type="hidden" name="useSavedSignature" value={useSavedSig ? "true" : ""} />
+
               <p className="text-sm font-semibold text-content">
-                Are you sure you want to attach your digital signature to this document?
+                Signing this document requires two explicit confirmations:
               </p>
+
+              {/* Step 1: Must review document */}
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={reviewed}
+                  onChange={(e) => setReviewed(e.target.checked)}
+                  className="mt-0.5 size-4 rounded border-line-strong text-primary focus:ring-primary/20"
+                />
+                <span className="text-sm text-content">
+                  I have reviewed this document and confirm its contents are correct.
+                </span>
+              </label>
+
+              {/* Step 2: Opt into attaching the saved signature */}
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={useSavedSig}
+                  onChange={(e) => setUseSavedSig(e.target.checked)}
+                  className="mt-0.5 size-4 rounded border-line-strong text-primary focus:ring-primary/20"
+                />
+                <span className="text-sm text-content">
+                  Attach my saved signature to this document
+                </span>
+              </label>
+
               <div className="flex gap-2">
                 <button
                   type="submit"
-                  className="h-9 rounded-lg bg-primary px-4 text-sm font-semibold text-white hover:bg-primary-hover"
+                  disabled={!reviewed || !useSavedSig}
+                  className="h-9 rounded-lg bg-primary px-4 text-sm font-semibold text-white hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Confirm &amp; Sign
                 </button>
                 <button
                   type="button"
-                  onClick={() => setConfirming(false)}
+                  onClick={() => { setConfirming(false); setReviewed(false); setUseSavedSig(false); }}
                   className="h-9 rounded-lg border border-line-strong px-4 text-sm font-semibold text-content hover:border-primary"
                 >
                   Cancel

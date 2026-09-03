@@ -16,6 +16,7 @@ import {
 import { FormOrgPicker } from "@/components/forms/org-picker";
 import { SignatureRouteSection } from "@/components/forms/signature-route-section";
 import { getApproversSignatures, getSignaturesFor, type SignatureInfo } from "@/lib/signatures";
+import { getSignedRolesForSf } from "@/lib/signature-routing";
 export const instant = false;
 
 export const metadata: Metadata = { title: "SF-005 · List of Members of the Organization" };
@@ -126,10 +127,12 @@ export default async function Sf005Page({
   const orgDisplay = org.acronym ? `${org.name} (${org.acronym})` : org.name;
   const [ayStart, ayEnd] = ay.split("-");
   const memberIds = org.members.map((m) => m.user.id);
-  const [sigMap, approverSigs] = await Promise.all([
+  const [sigMap, approverSigs, signedRoles] = await Promise.all([
     getSignaturesFor([...memberIds, ...org.advisers.map((a) => a.adviser.id), dean?.id]),
     getApproversSignatures(),
+    getSignedRolesForSf("SF005", org.id, ay),
   ]);
+  const signed = (role: string) => signedRoles.has(role);
 
   return (
     <>
@@ -176,7 +179,7 @@ export default async function Sf005Page({
               key={i}
               name={org.advisers[i] ? `${org.advisers[i].adviser.firstName} ${org.advisers[i].adviser.lastName}` : ""}
               width="55mm"
-              sig={org.advisers[i] ? sigMap.get(org.advisers[i].adviser.id) : null}
+              sig={org.advisers[i] && signed("SENIOR_ADVISER") ? sigMap.get(org.advisers[i].adviser.id) : null}
               ariaLabel={`Adviser signature ${i + 1}`}
               caption={
                 <>
@@ -197,14 +200,14 @@ export default async function Sf005Page({
             caption="Dean/Assoc. Dean of College"
             width="60mm"
             center={false}
-            sig={dean ? sigMap.get(dean.id) : null}
+            sig={dean && signed("DEAN") ? sigMap.get(dean.id) : null}
             ariaLabel="Dean signature"
           />
         </div>
 
         <SfApprovers
-          coordinatorSig={approverSigs.coordinator}
-          directorSig={approverSigs.director}
+          coordinatorSig={signed("SOA") ? approverSigs.coordinator : null}
+          directorSig={signed("OSAS") ? approverSigs.director : null}
           spaced
         />
         <SfFooter code="LSPU-OSAS-SF-005" />

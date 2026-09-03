@@ -5,9 +5,8 @@ import { requireUser } from "@/lib/auth/guards";
 import { can } from "@/lib/auth/rbac";
 import { REPORT_STATUS_META } from "@/lib/constants";
 import { formatDate, formatDateTime, formatMoney } from "@/lib/utils";
-import { getSignaturesFor } from "@/lib/signatures";
 import { PrintToolbar } from "@/components/forms/editable";
-import { SfLetterhead, SfSig } from "@/components/forms/sf-chrome";
+import { SfLetterhead } from "@/components/forms/sf-chrome";
 export const instant = false;
 
 export const metadata: Metadata = { title: "Accomplishment report record" };
@@ -110,7 +109,6 @@ export default async function PrintReportPage({ params }: { params: Promise<{ id
   }
 
   const president = org?.members[0]?.user ?? null;
-  const sigMap = await getSignaturesFor([president?.id, report.decidedBy?.id]);
   const orgDisplay = report.organization.acronym
     ? `${report.organization.name} (${report.organization.acronym})`
     : report.organization.name;
@@ -235,34 +233,18 @@ export default async function PrintReportPage({ params }: { params: Promise<{ id
 
         <div className="mt-12 flex justify-between text-center text-[11pt]">
           <div>
-            {president ? (
-              <SfSig
-                name={`${president.firstName.toUpperCase()} ${president.lastName.toUpperCase()}`}
-                caption="President"
-                ariaLabel="President signature"
-                sig={sigMap.get(president.id) ?? null}
-              />
-            ) : (
-              <div>
-                <p className="w-[55mm] border-t border-black pt-1">&nbsp;</p>
-                <p>President</p>
-              </div>
-            )}
+            <p className="w-[55mm] border-t border-black pt-1">&nbsp;</p>
+            <p>{president ? `${president.firstName.toUpperCase()} ${president.lastName.toUpperCase()}` : ""}</p>
+            <p>President</p>
           </div>
           <div>
-            {report.decidedBy ? (
-              <SfSig
-                name={`${report.decidedBy.firstName.toUpperCase()} ${report.decidedBy.lastName.toUpperCase()}`}
-                caption="Accepted by, OSAS/College Review"
-                ariaLabel="Reviewer signature"
-                sig={sigMap.get(report.decidedBy.id) ?? null}
-              />
-            ) : (
-              <div>
-                <p className="w-[55mm] border-t border-black pt-1">&nbsp;</p>
-                <p>Accepted by, OSAS/College Review</p>
-              </div>
-            )}
+            <p className="w-[55mm] border-t border-black pt-1">&nbsp;</p>
+            <p>
+              {report.decidedBy
+                ? `${report.decidedBy.firstName.toUpperCase()} ${report.decidedBy.lastName.toUpperCase()}`
+                : ""}
+            </p>
+            <p>Accepted by, OSAS/College Review</p>
           </div>
         </div>
 

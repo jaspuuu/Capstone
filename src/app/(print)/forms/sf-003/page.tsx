@@ -16,6 +16,7 @@ import {
 import { FormOrgPicker } from "@/components/forms/org-picker";
 import { SignatureRouteSection } from "@/components/forms/signature-route-section";
 import { getApproversSignatures, getSignaturesFor, hasSignature } from "@/lib/signatures";
+import { getSignedRolesForSf } from "@/lib/signature-routing";
 export const instant = false;
 
 export const metadata: Metadata = { title: "SF-003 · Organization Adviser Commitment Form" };
@@ -78,12 +79,14 @@ export default async function Sf003Page({
   const dean = org.college.dean;
   const orgDisplay = org.acronym ? `${org.name} (${org.acronym})` : org.name;
   const [ayStart, ayEnd] = ay.split("-");
-  const [sigMap, approverSigs] = await Promise.all([
+  const [sigMap, approverSigs, signedRoles] = await Promise.all([
     getSignaturesFor([primary?.adviser.id, dean?.id]),
     getApproversSignatures(),
+    getSignedRolesForSf("SF003", org.id, ay),
   ]);
-  const primarySig = primary ? sigMap.get(primary.adviser.id) ?? null : null;
-  const deanSig = dean ? sigMap.get(dean.id) ?? null : null;
+  const signed = (role: string) => signedRoles.has(role);
+  const primarySig = primary && signed("SENIOR_ADVISER") ? sigMap.get(primary.adviser.id) ?? null : null;
+  const deanSig = dean && signed("DEAN") ? sigMap.get(dean.id) ?? null : null;
 
   return (
     <>
@@ -187,8 +190,8 @@ export default async function Sf003Page({
         </div>
 
         <SfApprovers
-          coordinatorSig={approverSigs.coordinator}
-          directorSig={approverSigs.director}
+          coordinatorSig={signed("SOA") ? approverSigs.coordinator : null}
+          directorSig={signed("OSAS") ? approverSigs.director : null}
           spaced
         />
         <SfFooter code="LSPU-OSAS-SF-003" />

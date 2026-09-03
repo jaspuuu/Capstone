@@ -59,6 +59,15 @@ export async function signCurrentStep(
     if (formData.get("confirm") !== "yes") {
       return { error: "You must explicitly confirm attaching your digital signature." };
     }
+    // A signature is never attached implicitly: the signatory must separately
+    // confirm they reviewed the document AND opted into attaching their saved
+    // signature. Both are enforced server-side, not just in the UI.
+    if (formData.get("confirmReview") !== "yes") {
+      return { error: "You must confirm that you reviewed this document before signing." };
+    }
+    if (formData.get("useSavedSignature") !== "true") {
+      return { error: "You must opt into attaching your saved signature to this document." };
+    }
 
 const route = await db.signatureRoute.findUnique({
       where: { id: routeId },

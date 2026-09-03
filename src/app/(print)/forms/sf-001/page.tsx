@@ -16,6 +16,7 @@ import {
 import { FormOrgPicker } from "@/components/forms/org-picker";
 import { SignatureRouteSection } from "@/components/forms/signature-route-section";
 import { getApproversSignatures, getSignaturesFor } from "@/lib/signatures";
+import { getSignedRolesForSf } from "@/lib/signature-routing";
 export const instant = false;
 
 export const metadata: Metadata = { title: "SF-001 · Application for Recognition/Renewal" };
@@ -74,14 +75,16 @@ export default async function Sf001Page({
     },
   });
   const deanUser = dean?.college.dean ?? null;
-  const [sigMap, approverSigs] = await Promise.all([
+  const [sigMap, approverSigs, signedRoles] = await Promise.all([
     getSignaturesFor([
       president?.id,
       ...org.advisers.map((a) => a.adviser.id),
       deanUser?.id,
     ]),
     getApproversSignatures(),
+    getSignedRolesForSf("SF001", org.id, ay),
   ]);
+  const signed = (role: string) => signedRoles.has(role);
   const orgDisplay = org.acronym ? `${org.name} (${org.acronym})` : org.name;
 
   return (
@@ -144,7 +147,7 @@ export default async function Sf001Page({
             name={president ? `${president.firstName} ${president.lastName}` : ""}
             caption="Organization President"
             width="55mm"
-            sig={president ? sigMap.get(president.id) : null}
+            sig={president && signed("PRESIDENT") ? sigMap.get(president.id) : null}
             ariaLabel="Organization President signature"
           />
         </div>
@@ -159,7 +162,9 @@ export default async function Sf001Page({
             {org.advisers.length > 0 ? (
               org.advisers.map((a, i) => (
                 <div key={i}>
-                  {sigMap.get(a.adviser.id) && <SignatureMark sig={sigMap.get(a.adviser.id)!} />}
+                  {signed("SENIOR_ADVISER") && sigMap.get(a.adviser.id) && (
+                    <SignatureMark sig={sigMap.get(a.adviser.id)!} />
+                  )}
                   <Editable
                     initial={`${a.adviser.firstName}${a.adviser.middleName ? ` ${a.adviser.middleName}` : ""} ${a.adviser.lastName}`}
                     minWidth="55mm"
@@ -176,14 +181,14 @@ export default async function Sf001Page({
             name={deanUser ? `${deanUser.firstName} ${deanUser.lastName}` : ""}
             caption="Dean/Assoc. Dean of College"
             width="55mm"
-            sig={deanUser ? sigMap.get(deanUser.id) : null}
+            sig={deanUser && signed("DEAN") ? sigMap.get(deanUser.id) : null}
             ariaLabel="Dean signature"
           />
         </div>
 
         <SfApprovers
-          coordinatorSig={approverSigs.coordinator}
-          directorSig={approverSigs.director}
+          coordinatorSig={signed("SOA") ? approverSigs.coordinator : null}
+          directorSig={signed("OSAS") ? approverSigs.director : null}
         />
         <SfFooter code="LSPU-OSAS-SF-001" />
       </div>

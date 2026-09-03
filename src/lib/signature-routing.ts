@@ -1,6 +1,6 @@
 import "server-only";
 import { db } from "@/lib/db";
-import { formRoute } from "@/lib/form-routes";
+import { formRoute, sfRouteEntityId } from "@/lib/form-routes";
 
 // ---------------------------------------------------------------------------
 // Signature routing core (§9 strict sequencing). Every helper here re-derives
@@ -82,6 +82,23 @@ export async function getRouteWithSteps(entityType: string, entityId: string) {
       },
     },
   });
+}
+
+/**
+ * Roles that have actually SIGNED the given SF form instance (formKey + org
+ * + AY), read from the routed workflow. A signature must only ever be rendered
+ * on the printed document when this confirms the step was explicitly signed.
+ * Returns an empty set when no route exists yet.
+ */
+export async function getSignedRolesForSf(formKey: string, orgId: string, ay: string) {
+  const route = await getRouteWithSteps("SF", sfRouteEntityId(formKey, orgId, ay));
+  const signed = new Set<string>();
+  if (route) {
+    for (const s of route.steps) {
+      if (s.status === "SIGNED" && s.signerId) signed.add(s.role);
+    }
+  }
+  return signed;
 }
 
 /** Lazily creates the route for a form instance using its configured sequence. */

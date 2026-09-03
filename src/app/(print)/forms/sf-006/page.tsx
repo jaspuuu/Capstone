@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth/guards";
 import { canUseOrgForm } from "@/lib/forms-access";
+import { currentAcademicYear } from "@/lib/utils";
 import { Editable, PrintToolbar } from "@/components/forms/editable";
 import {
   SfDateBlank,
@@ -13,6 +14,7 @@ import {
 } from "@/components/forms/sf-chrome";
 import { FormOrgPicker } from "@/components/forms/org-picker";
 import { getApproversSignatures, getSignaturesFor } from "@/lib/signatures";
+import { getSignedRolesForSf } from "@/lib/signature-routing";
 export const instant = false;
 
 export const metadata: Metadata = { title: "SF-006 · Certification" };
@@ -76,10 +78,12 @@ export default async function Sf006Page({
     member?.position === "PRESIDENT" ? "President" : member?.position === "SECRETARY" ? "Secretary" : "";
   const dean = org.college.dean;
   const orgDisplay = org.acronym ? `${org.name} (${org.acronym})` : org.name;
-  const [sigMap, approverSigs] = await Promise.all([
+  const [sigMap, approverSigs, signedRoles] = await Promise.all([
     getSignaturesFor([...org.advisers.map((a) => a.adviser.id), dean?.id]),
     getApproversSignatures(),
+    getSignedRolesForSf("SF006", org.id, currentAcademicYear()),
   ]);
+  const signed = (role: string) => signedRoles.has(role);
 
   return (
     <>
@@ -123,7 +127,7 @@ export default async function Sf006Page({
                 caption="Organization Adviser(s)"
                 width="60mm"
                 center={false}
-                sig={sigMap.get(a.adviser.id)}
+                sig={signed("SENIOR_ADVISER") ? sigMap.get(a.adviser.id) : null}
                 ariaLabel={`Adviser signature ${i + 1}`}
               />
             ))
@@ -142,7 +146,7 @@ export default async function Sf006Page({
             caption="Dean/Assoc. Dean of College"
             width="60mm"
             center={false}
-            sig={dean ? sigMap.get(dean.id) : null}
+            sig={dean && signed("DEAN") ? sigMap.get(dean.id) : null}
             ariaLabel="Dean signature"
           />
         </div>
@@ -150,7 +154,7 @@ export default async function Sf006Page({
         <p className="mt-10 font-bold">Noted:</p>
 
         <div className="mt-16 text-center">
-          {approverSigs.director && (
+          {signed("OSAS") && approverSigs.director && (
             <div className="mb-1">
               <SignatureMark sig={approverSigs.director} />
             </div>

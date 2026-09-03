@@ -9,6 +9,7 @@ import { SfApprovers, SfDateBlank, SfFooter, SfLetterhead, SfSig } from "@/compo
 import { FormOrgPicker } from "@/components/forms/org-picker";
 import { SignatureRouteSection } from "@/components/forms/signature-route-section";
 import { getApproversSignatures, getSignaturesFor } from "@/lib/signatures";
+import { getSignedRolesForSf } from "@/lib/signature-routing";
 export const instant = false;
 
 export const metadata: Metadata = { title: "SF-002 · Organization Renewal Form" };
@@ -49,14 +50,16 @@ export default async function Sf002Page({
 
   const president = org.members.find((m) => m.position === "PRESIDENT")?.user;
   const dean = org.college.dean;
-  const [sigMap, approverSigs] = await Promise.all([
+  const [sigMap, approverSigs, signedRoles] = await Promise.all([
     getSignaturesFor([
       president?.id,
       ...org.advisers.map((a) => a.adviser.id),
       dean?.id,
     ]),
     getApproversSignatures(),
+    getSignedRolesForSf("SF002", org.id, ay),
   ]);
+  const signed = (role: string) => signedRoles.has(role);
   const orgDisplay = org.acronym ? `${org.name} (${org.acronym})` : org.name;
   const [ayStart, ayEnd] = ay.split("-");
 
@@ -111,7 +114,7 @@ export default async function Sf002Page({
             name={president ? `${president.firstName} ${president.lastName}` : ""}
             caption="Organization President"
             width="55mm"
-            sig={president ? sigMap.get(president.id) : null}
+            sig={president && signed("PRESIDENT") ? sigMap.get(president.id) : null}
             ariaLabel="Organization President signature"
           />
         </div>
@@ -131,7 +134,7 @@ export default async function Sf002Page({
                   caption="Adviser/s Student Organization"
                   width="60mm"
                   center={false}
-                  sig={sigMap.get(a.adviser.id)}
+                  sig={signed("SENIOR_ADVISER") ? sigMap.get(a.adviser.id) : null}
                   ariaLabel="Adviser signature"
                 />
               ))
@@ -149,7 +152,7 @@ export default async function Sf002Page({
             name={dean ? `${dean.firstName} ${dean.lastName}` : ""}
             width="80mm"
             center={false}
-            sig={dean ? sigMap.get(dean.id) : null}
+            sig={dean && signed("DEAN") ? sigMap.get(dean.id) : null}
             ariaLabel="Dean signature"
             caption={
               <>
@@ -161,8 +164,8 @@ export default async function Sf002Page({
         </div>
 
         <SfApprovers
-          coordinatorSig={approverSigs.coordinator}
-          directorSig={approverSigs.director}
+          coordinatorSig={signed("SOA") ? approverSigs.coordinator : null}
+          directorSig={signed("OSAS") ? approverSigs.director : null}
         />
         <SfFooter code="LSPU-OSAS-SF-002" />
       </div>

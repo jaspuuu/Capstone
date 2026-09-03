@@ -146,6 +146,67 @@ async function main() {
     },
   });
 
+  // ------------------------------------------------------- Bulk demo accounts
+  // Create only — not wired into any organization roster. Idempotent by email.
+  // Student numbers are assigned sequentially (not randomized) so they stay unique.
+  const makeAccounts = (
+    rows: { email: string; role: string; firstName: string; lastName: string; middleName?: string }[],
+    startStudentIndex: number
+  ) =>
+    Promise.all(
+      rows.map((r, i) =>
+        prisma.user.upsert({
+          where: { email: r.email },
+          update: {},
+          create: {
+            email: r.email,
+            passwordHash: pw,
+            firstName: r.firstName,
+            lastName: r.lastName,
+            middleName: r.middleName,
+            role: r.role as never,
+            studentNumber:
+              r.role === "MEMBER" || r.role === "PRESIDENT"
+                ? `20${21 + ((startStudentIndex + i) % 4)}-${String(30000 + startStudentIndex + i).slice(0, 5)}`
+                : undefined,
+            positionTitle: "Student",
+          },
+        })
+      )
+    );
+
+  const bulkPresidents = [] as { email: string; role: string; firstName: string; lastName: string }[];
+  for (let i = 1; i <= 8; i += 1) {
+    bulkPresidents.push({
+      email: `president.mass${i}@lspu.edu.ph`,
+      role: "PRESIDENT",
+      firstName: `President`,
+      lastName: `Mass${i}`,
+    });
+  }
+  const bulkAdvisers = [] as { email: string; role: string; firstName: string; lastName: string }[];
+  for (let i = 1; i <= 20; i += 1) {
+    const role = i % 2 === 0 ? "ADVISER_REGULAR" : "ADVISER_PARTTIME";
+    bulkAdvisers.push({
+      email: `adviser.mass${i}@lspu.edu.ph`,
+      role,
+      firstName: `Adviser`,
+      lastName: `Mass${i}`,
+    });
+  }
+  const bulkMembers = [] as { email: string; role: string; firstName: string; lastName: string }[];
+  for (let i = 1; i <= 50; i += 1) {
+    bulkMembers.push({
+      email: `member.mass${i}@lspu.edu.ph`,
+      role: "MEMBER",
+      firstName: `Member`,
+      lastName: `Mass${i}`,
+    });
+  }
+  const bulkAccounts = [...bulkPresidents, ...bulkAdvisers, ...bulkMembers];
+  await makeAccounts(bulkAccounts, 0);
+  console.log(`Bulk demo accounts ensured (${bulkAccounts.length}): ${bulkPresidents.length} presidents, ${bulkAdvisers.length} advisers, ${bulkMembers.length} members.`);
+
   // ------------------------------------------------------------ Colleges
   const ccs = await prisma.college.upsert({
     where: { code: "CCS" },

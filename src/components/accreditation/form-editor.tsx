@@ -22,11 +22,20 @@ export interface FormField {
   autoPopulate?: (org: any, user: any, recognition: any) => any;
 }
 
+export interface SignatureSlot {
+  role: string;
+  order: number;
+  required: boolean;
+  conditionalOn?: string | null;
+  description?: string | null;
+}
+
 export interface FormTemplate {
   key: string;
   title: string;
   description: string;
   fields: FormField[];
+  signatureSlots?: SignatureSlot[];
   previewTemplate: (data: PreviewData) => React.ReactNode;
 }
 

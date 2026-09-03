@@ -280,6 +280,13 @@ export default async function OrganizationDetailPage({
             Documents
           </Link>
           <Link
+            href={`/organizations/${org.id}/accreditation`}
+            className="inline-flex h-10 items-center gap-2 rounded-lg border border-line-strong bg-surface px-4 text-sm font-semibold text-content hover:border-primary"
+          >
+            <Award className="size-4" aria-hidden />
+            Accreditation
+          </Link>
+          <Link
             href={`/organizations/${org.id}/monitoring`}
             className="inline-flex h-10 items-center gap-2 rounded-lg border border-line-strong bg-surface px-4 text-sm font-semibold text-content hover:border-primary"
           >
