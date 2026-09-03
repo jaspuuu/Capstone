@@ -52,6 +52,7 @@ export default async function Sf001Page({
       name: true,
       acronym: true,
       collegeId: true,
+      college: { select: { name: true, dean: { select: { id: true, firstName: true, lastName: true } } } },
       members: {
         where: { isCurrent: true, academicYear: ay },
         select: { position: true, user: { select: { id: true, firstName: true, lastName: true } } },
@@ -68,13 +69,7 @@ export default async function Sf001Page({
   if (!(await canUseOrgForm(user, org))) notFound();
 
   const president = org.members.find((m) => m.position === "PRESIDENT")?.user;
-  const dean = await db.organization.findUnique({
-    where: { id: org.id },
-    select: {
-      college: { select: { dean: { select: { id: true, firstName: true, lastName: true } } } },
-    },
-  });
-  const deanUser = dean?.college.dean ?? null;
+  const deanUser = org.college?.dean ?? null;
   const [sigMap, approverSigs, signedRoles] = await Promise.all([
     getSignaturesFor([
       president?.id,
