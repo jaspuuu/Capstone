@@ -26,9 +26,15 @@ export type ActionState = { error?: string; success?: string };
 async function loadRecognition(id: string) {
   const rec = await db.recognition.findUnique({
     where: { id },
-    include: {
-      organization: true,
-      events: { orderBy: { createdAt: "asc" }, include: { actor: true } },
+    select: {
+      id: true,
+      status: true,
+      academicYear: true,
+      organizationId: true,
+      interviewStatus: true,
+      interviewAt: true,
+      interviewNotes: true,
+      organization: { select: { name: true, acronym: true, collegeId: true } },
     },
   });
   return rec;
@@ -241,18 +247,20 @@ function transitionAction(transition: Transition) {
       if (!can(user, permission)) {
         return { error: "You do not have permission to submit this application." };
       }
-      try {
-        await assertOfficerOf(user.id, rec.organizationId);
-      } catch {
-        return { error: "Only current officers of this organization can submit." };
-      }
       // §5: the SF-001 checklist must be complete before the application
       // (initial or renewal) can leave the draft stage.
-      const gaps = await missingChecklistRequirements(
-        rec.id,
-        rec.organizationId,
-        rec.academicYear
-      );
+      const [{ membershipExists }, gaps] = await Promise.all([
+        db.organizationMember
+          .findFirst({
+            where: { userId: user.id, organizationId: rec.organizationId, isCurrent: true },
+            select: { id: true },
+          })
+          .then((m) => ({ membershipExists: Boolean(m) })),
+        missingChecklistRequirements(rec.id, rec.organizationId, rec.academicYear),
+      ]);
+      if (!membershipExists) {
+        return { error: "Only current officers of this organization can submit." };
+      }
       if (gaps.length > 0) {
         return {
           error: `Complete the SF-001 checklist before submitting: ${gaps.join(", ")}. You can upload them from the organization's Documents page.`,
@@ -298,8 +306,21 @@ function transitionAction(transition: Transition) {
     }
     if (spec.to === "RETURNED" && note) data.remarks = note;
 
-    await db.recognition.update({ where: { id }, data: data as never });
-    await recordEvent(id, user.id, transition, rec.status, spec.to, note || null);
+    // State change + event log commit atomically so a submitted/reviewed
+    // application can never exist without its corresponding event trail.
+    await db.$transaction([
+      db.recognition.update({ where: { id }, data: data as never }),
+      db.recognitionEvent.create({
+        data: {
+          recognitionId: id,
+          actorId: user.id,
+          action: transition,
+          fromStatus: rec.status,
+          toStatus: spec.to,
+          note: note ?? null,
+        },
+      }),
+    ]);
 
     const auditAction: Record<Transition, string> = {
       SUBMIT: "APPLICATION_SUBMITTED",
