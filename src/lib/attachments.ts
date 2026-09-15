@@ -2,19 +2,27 @@ import { createHash, randomBytes } from "node:crypto";
 import { mkdir, unlink, writeFile, readFile } from "node:fs/promises";
 import path from "node:path";
 import { put, del, head } from "@vercel/blob";
+import {
+  SUPABASE_STORAGE_ENABLED,
+  supabaseStoragePut,
+  supabaseStorageDelete,
+  supabaseStorageRead,
+} from "./supabase-storage";
 
 /**
  * Attachment storage. Files live under an unguessable random name; the
  * database keeps metadata and downloads go through an authenticated route
  * handler that streams bytes per request.
  *
- * Two drivers behind one interface:
+ * Three drivers behind one interface, selected by environment:
  * - local disk (STORAGE_DIR) during development / on a VM;
- * - Vercel Blob in production, selected automatically whenever a
- *   BLOB_READ_WRITE_TOKEN is present (serverless disks are ephemeral).
- *   Blob objects are access-public but carry the same unguessable-random-
- *   name guarantee as local storage, and all in-app reads still go through
- *   the permission-checked download route.
+ * - Vercel Blob, whenever a BLOB_READ_WRITE_TOKEN is present;
+ * - Supabase Storage (server-side service-role I/O, private bucket),
+ *   whenever SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY are present.
+ *
+ * Precedence: Vercel Blob token → Supabase — otherwise local disk.
+ * Every in-app read still goes through the permission-checked download
+ * route regardless of driver.
  *
  * Configurable policy: allowed MIME types and size cap.
  */
@@ -68,6 +76,23 @@ export async function saveAttachmentFile(storedName: string, bytes: Buffer): Pro
     await put(storedName, bytes, { access: "public", addRandomSuffix: false });
     return;
   }
+  if (SUPABASE_STORAGE_ENABLED) {
+    const mime = storedName.endsWith(".pdf")
+      ? "application/pdf"
+      : storedName.endsWith(".png")
+        ? "image/png"
+        : storedName.endsWith(".jpg")
+          ? "image/jpeg"
+          : storedName.endsWith(".webp")
+            ? "image/webp"
+            : storedName.endsWith(".docx")
+              ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              : storedName.endsWith(".xlsx")
+                ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                : "application/octet-stream";
+    await supabaseStoragePut(storedName, bytes, mime);
+    return;
+  }
   await mkdir(STORAGE_DIR, { recursive: true });
   await writeFile(path.join(/* turbopackIgnore: true */ STORAGE_DIR, storedName), bytes);
 }
@@ -79,6 +104,10 @@ export async function deleteAttachmentFile(storedName: string): Promise<void> {
     } catch {
       // Already gone — deleting the row is still the correct outcome.
     }
+    return;
+  }
+  if (SUPABASE_STORAGE_ENABLED) {
+    await supabaseStorageDelete(storedName);
     return;
   }
   try {
@@ -99,6 +128,9 @@ export async function readAttachmentFile(storedName: string): Promise<Buffer | n
     } catch {
       return null;
     }
+  }
+  if (SUPABASE_STORAGE_ENABLED) {
+    return supabaseStorageRead(storedName);
   }
   try {
     return await readFile(path.join(/* turbopackIgnore: true */ STORAGE_DIR, storedName));
