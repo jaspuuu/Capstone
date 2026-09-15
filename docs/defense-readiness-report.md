@@ -4,7 +4,7 @@ Prepared for the capstone defense of **ORGanIZE** (Next.js 16 + Prisma/PostgreSQ
 
 Scope: a five-phase hardening pass over the existing application. No database reset was run and the production database is untouched (all work is local `organize` on `localhost:5432`). Seed changes only affect fresh-seed or newly seeded local environments and are idempotent.
 
-Status of every automated gate, run on the final tree: **all green**.
+Status of every automated gate, run on the final tree: **all green**. Final commit (`b589b28`) deployed and verified live at `https://organize-lspu-jaspu.vercel.app`.
 
 | Gate | Command | Result |
 | --- | --- | --- |
