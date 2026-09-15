@@ -4,6 +4,7 @@ import { useActionState, useState } from "react";
 import { Alert } from "@/components/ui/alert";
 import { Field, Input, Select, Textarea } from "@/components/ui/form";
 import { SubmitButton } from "@/components/ui/submit-button";
+import { useExitGuard } from "@/components/unsaved-guard";
 import type { ParticipantOption } from "@/lib/organization-participants";
 
 type ActionState = { error?: string; success?: string };
@@ -49,11 +50,22 @@ export function ReportForm({
   const [state, formAction] = useActionState<ActionState, FormData>(action, {});
   const [selOrg, setSelOrg] = useState<string>(initial?.organizationId ?? "");
   const roster = orgMembers[selOrg] ?? [];
+  const [dirty, setDirty] = useState(false);
+  const [prevState, setPrevState] = useState(state);
   const [participantIds, setParticipantIds] = useState<string[]>(
     initial
       ? initialParticipantIds.filter((id) => roster.some((m) => m.userId === id))
       : []
   );
+
+  useExitGuard(dirty);
+
+  // Disarm the exit guard only after a successful submit (new action-state
+  // object); a later edit re-arms it, and a failed submit never reaches it.
+  if (prevState !== state) {
+    setPrevState(state);
+    if (state.success) setDirty(false);
+  }
   const [count, setCount] = useState<string>(
     initial?.actualParticipants != null ? String(initial.actualParticipants) : ""
   );
@@ -83,7 +95,7 @@ export function ReportForm({
   }
 
   return (
-    <form action={formAction} className="space-y-5">
+    <form action={formAction} onInput={() => setDirty(true)} className="space-y-5">
       {initial?.id && <input type="hidden" name="id" value={initial.id} />}
       {state.error && <Alert tone="danger">{state.error}</Alert>}
 

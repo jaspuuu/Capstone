@@ -4,11 +4,13 @@ import { db } from "@/lib/db";
 import { currentAcademicYear, formatMoney } from "@/lib/utils";
 import { canUseOrgForm } from "@/lib/forms-access";
 import { getSignaturesFor, type SignatureInfo } from "@/lib/signatures";
-import { getSignedRolesForSf } from "@/lib/signature-routing";
+import { getSignedRolesForSf, findSignedDataDrift } from "@/lib/signature-routing";
+import { sfRouteEntityId } from "@/lib/form-routes";
 import { readAttachmentFile } from "@/lib/attachments";
 import { generateOfficialDocx, masterTemplatePath, type FormData } from "@/lib/docx/forms";
 import { loadFormDraft, mergeDraftIntoFormData } from "@/lib/form-draft";
 import { docxToPdf, PdfConversionError, pdfConversionAvailable } from "@/lib/documents/pdf";
+import { writeAudit } from "@/lib/audit";
 
 const FORMS = new Set(["SF001", "SF002", "SF003", "SF004", "SF005", "SF006"]);
 
@@ -21,16 +23,27 @@ function fmtShort(d: Date): string {
 }
 
 /** Reads a signatory's stored signature image when their role is signed
- * (§16: correct role on the current workflow state AND a saved signature). */
+ * (§16: correct role on the current workflow state AND a saved signature).
+ *
+ * The preferred source is the SignatureStep snapshot taken at sign time
+ * (`stepSigs`) — the moment-of-signing image, which survives the signer later
+ * changing their profile signature. The live User row (`sigMap`) is only a
+ * fallback for roles without a routed step (e.g. legacy data). */
 async function sigIfSigned(
   sigMap: Map<string, SignatureInfo>,
   signedRoles: Set<string>,
   role: string,
   userId?: string | null,
+  stepSigs: Map<string, string> = new Map(),
   strict = true
 ): Promise<{ bytes: Buffer } | null> {
   if (!userId) return null;
   if (strict && !signedRoles.has(role)) return null;
+  const snapshot = stepSigs.get(role);
+  if (snapshot) {
+    const bytes = await readAttachmentFile(snapshot);
+    return bytes ? { bytes } : null;
+  }
   const info = sigMap.get(userId);
   if (!info || !info.image) return null;
   const bytes = await readAttachmentFile(info.image);
@@ -112,7 +125,7 @@ export async function GET(
   const secretary = org.members.find((m) => m.position === "SECRETARY")?.user;
   const dean = org.college.dean;
 
-  const [sigMap, signedRoles] = await Promise.all([
+  const [sigMap, signedRoles, stepSigs, driftRoles] = await Promise.all([
     getSignaturesFor([
       president?.id,
       secretary?.id,
@@ -121,7 +134,32 @@ export async function GET(
       ...org.members.map((m) => m.user.id),
     ]),
     getSignedRolesForSf(formKey, org.id, ay),
+    // Snapshot images captured at sign time — the authoritative source for
+    // what was actually applied, regardless of later profile changes.
+    db.signatureStep
+      .findMany({
+        where: {
+          route: { entityType: "SF", entityId: sfRouteEntityId(formKey, org.id, ay) },
+          status: "SIGNED",
+          signatureImage: { not: null },
+        },
+        select: { role: true, signatureImage: true },
+      })
+      .then((rows) => new Map(rows.map((r) => [r.role, r.signatureImage as string]))),
+    // If any SIGNED step's content snapshot no longer matches the current
+    // document data, the content was altered after signing — refuse export
+    // rather than print a signature that no longer covers the document.
+    findSignedDataDrift(formKey, org.id, ay),
   ]);
+
+  if (driftRoles.length > 0) {
+    return NextResponse.json(
+      {
+        error: `The document content changed after it was signed (${driftRoles.join(", ")}). Re-verify and re-sign before exporting.`,
+      },
+      { status: 409 }
+    );
+  }
 
   // Current officeholders for the pre-printed approver names (approved:
   // print the current SOA/OSAS, not the stale names in the 2020 master).
@@ -131,7 +169,7 @@ export async function GET(
   ]);
 
   const adviserSigs = await Promise.all(
-    org.advisers.map((a) => sigIfSigned(sigMap, signedRoles, "SENIOR_ADVISER", a.adviser.id))
+    org.advisers.map((a) => sigIfSigned(sigMap, signedRoles, "SENIOR_ADVISER", a.adviser.id, stepSigs))
   );
 
   const memberSigBytes = await Promise.all(
@@ -150,13 +188,13 @@ export async function GET(
     president: president
       ? {
           name: fullName(president),
-          sig: await sigIfSigned(sigMap, signedRoles, "PRESIDENT", president.id),
+          sig: await sigIfSigned(sigMap, signedRoles, "PRESIDENT", president.id, stepSigs),
         }
       : undefined,
     secretary: secretary
       ? {
           name: fullName(secretary),
-          sig: await sigIfSigned(sigMap, signedRoles, "SECRETARY", secretary.id),
+          sig: await sigIfSigned(sigMap, signedRoles, "SECRETARY", secretary.id, stepSigs),
         }
       : undefined,
     advisers: org.advisers.map((a, i) => ({
@@ -164,7 +202,7 @@ export async function GET(
       sig: adviserSigs[i],
     })),
     dean: dean
-      ? { name: fullName(dean), sig: await sigIfSigned(sigMap, signedRoles, "DEAN", dean.id) }
+      ? { name: fullName(dean), sig: await sigIfSigned(sigMap, signedRoles, "DEAN", dean.id, stepSigs) }
       : undefined,
     adviserInfo: org.advisers[0]
       ? { name: fullName(org.advisers[0].adviser), college: org.college.name }
@@ -241,8 +279,7 @@ export async function GET(
     return NextResponse.json(
       {
         error: isDev ? `Document generation failed at stage "${stage}": ${message}` : friendlyError,
-        stage,
-        message: isDev ? message : undefined,
+        ...(isDev ? { stage, message } : {}),
       },
       { status: 500 }
     );
@@ -250,6 +287,16 @@ export async function GET(
 
   const slug = (org.acronym ?? org.name).replace(/[^A-Za-z0-9]+/g, "-").replace(/^[-_]+|[-_]+$/g, "");
   const filename = `LSPU-OSAS-${formKey.slice(0, 2)}-${formKey.slice(2)}-${slug}-${ay}`;
+
+  // Successful export — always record who pulled the official document.
+  writeAudit({
+    userId: user.id,
+    action: "DOCUMENT_EXPORTED",
+    entityType: "Organization",
+    entityId: org.id,
+    entityLabel: org.name,
+    newState: { formKey, ay, format, filename },
+  }).catch(() => undefined);
 
   if (format === "pdf") {
     // PDF rendering is a SEPARATE stage: a failed conversion must never be
@@ -267,13 +314,12 @@ export async function GET(
       return NextResponse.json(
         {
           error: "Official DOCX generated successfully, but PDF conversion failed.",
-          stage: "pdf_conversion",
-          hint: reason,
-          message: isDev ? message : undefined,
+          ...(isDev ? { stage: "pdf_conversion", hint: reason, message } : {}),
         },
         { status: 422 }
       );
     }
+    // Successful export — always record who pulled the official document.
     return new NextResponse(new Uint8Array(pdf), {
       headers: {
         "Content-Type": "application/pdf",

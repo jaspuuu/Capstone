@@ -6,6 +6,7 @@ import { can, scopedOrgWhere } from "@/lib/auth/rbac";
 import { db } from "@/lib/db";
 import type { Recognition, RecognitionStatus } from "@/generated/prisma/client";
 import { RECOGNITION_STATUS_META, REQUIREMENT_STATUS_META } from "@/lib/constants";
+import { SIGNATORY_LABELS } from "@/lib/form-routes";
 import { checklistForYear, compliancePct, type RequirementItem } from "@/lib/analytics";
 import { getSelectedAy } from "@/lib/ay-server";
 import { formatDateTime, fullName } from "@/lib/utils";
@@ -40,7 +41,7 @@ const STAGE_OPTIONS = [
   ["SUBMITTED", "Submitted"],
   ["UNDER_REVIEW", "Under Review"],
   ["FOR_APPROVAL", "For Approval"],
-  ["FOR_SIGNATURE", "For Signature"],
+  ["FOR_SIGNATURE", "Ready for Review"],
   ["APPROVED", "Approved"],
   ["RECOGNIZED", "Recognized"],
   ["RETURNED", "Returned"],
@@ -134,13 +135,14 @@ export default async function AccreditationProcessingPage({
     const compliance = compliancePct(requirements);
 
     // Determine current stage based on status and signature routes
-    let stage: string = r.status;
+    let stage: string =
+      RECOGNITION_STATUS_META[r.status]?.label ?? r.status;
     const routes = routesByRec.get(r.id) ?? [];
     const activeRoute = routes.find((sr) => sr.state === "IN_PROGRESS");
     if (activeRoute) {
       const currentStep = activeRoute.steps.find((s) => s.status === "CURRENT");
       if (currentStep) {
-        stage = `${r.status} · ${currentStep.role}`;
+        stage = `${stage} · ${SIGNATORY_LABELS[currentStep.role] ?? currentStep.role}`;
       }
     }
 
@@ -235,7 +237,7 @@ export default async function AccreditationProcessingPage({
             <option value="SUBMITTED">Submitted</option>
             <option value="UNDER_REVIEW">Under Review</option>
             <option value="FOR_APPROVAL">For Approval</option>
-            <option value="FOR_SIGNATURE">For Signature</option>
+            <option value="FOR_SIGNATURE">Ready for Review</option>
             <option value="APPROVED">Approved</option>
             <option value="RECOGNIZED">Recognized</option>
             <option value="RETURNED">Returned</option>

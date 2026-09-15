@@ -3,9 +3,21 @@
 import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { createSession, destroySession, getSessionUser } from "@/lib/auth/session";
-import { verifyPassword, hashPassword } from "@/lib/auth/password";
+import { verifyPassword, hashPassword, validatePasswordPolicy } from "@/lib/auth/password";
 import { getRequestMeta } from "@/lib/auth/guards";
 import { writeAudit } from "@/lib/audit";
+import {
+  clearRateLimit,
+  ipKey,
+  rateLimit,
+  rateLimitMessage,
+} from "@/lib/rate-limit";
+
+const LOGIN_BURST_KEY = "burst:login";
+const LOGIN_EMAIL_KEY = "attempt:login";
+const SIGNUP_IP_KEY = "burst:signup";
+const SIGNUP_EMAIL_KEY = "attempt:signup";
+const PASSWORD_CHANGE_KEY = "attempt:password-change";
 
 export type LoginState = { error?: string };
 
@@ -21,6 +33,15 @@ export async function login(_prev: LoginState, formData: FormData): Promise<Logi
   }
 
   const meta = await getRequestMeta();
+  const clientKey = ipKey(meta.ipAddress);
+
+  // Two independent thresholds: a short per-device burst ceiling (10/min) and
+  // a longer per-account window that resets on a successful sign-in.
+  const burst = await rateLimit(`${LOGIN_BURST_KEY}:${clientKey}`, 10, 60_000);
+  if (!burst.allowed) return { error: rateLimitMessage(burst.retryAfterSeconds) };
+  const attempts = await rateLimit(`${LOGIN_EMAIL_KEY}:${email}`, 5, 15 * 60_000);
+  if (!attempts.allowed) return { error: rateLimitMessage(attempts.retryAfterSeconds) };
+
   const user = await db.user.findUnique({ where: { email } });
 
   const invalid: LoginState = { error: "Invalid email or password." };
@@ -70,7 +91,13 @@ export async function login(_prev: LoginState, formData: FormData): Promise<Logi
   }
 
   await createSession(user.id, meta);
-  await db.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
+  // A successful sign-in is proof the account is authorized; reset the
+  // attempt counters so legitimate users are never progressively locked out.
+  await Promise.all([
+    clearRateLimit(`${LOGIN_EMAIL_KEY}:${email}`),
+    clearRateLimit(`${LOGIN_BURST_KEY}:${clientKey}`),
+    db.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } }),
+  ]);
   await writeAudit({
     userId: user.id,
     action: "LOGIN",
@@ -99,6 +126,26 @@ export async function logout(): Promise<void> {
   redirect("/login");
 }
 
+/**
+ * "Sign out all devices": revokes every session for the account including the
+ * current one, then redirects to the login page.
+ */
+export async function revokeAllSessions(): Promise<void> {
+  const user = await getSessionUser();
+  if (user) {
+    await db.session.deleteMany({ where: { userId: user.id } });
+    await writeAudit({
+      userId: user.id,
+      action: "SESSIONS_REVOKED",
+      entityType: "User",
+      entityId: user.id,
+      entityLabel: user.email,
+    });
+  }
+  await destroySession();
+  redirect("/login?notice=sessions_revoked");
+}
+
 export type SignUpState = { error?: string };
 
 /**
@@ -117,15 +164,23 @@ export async function signUp(_prev: SignUpState, formData: FormData): Promise<Si
   if (firstName.length > 60 || lastName.length > 60 || middleName.length > 60)
     return { error: "Names may not exceed 60 characters." };
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { error: "Enter a valid email address." };
-  if (password.length < 8) return { error: "Password must be at least 8 characters." };
+  const policyError = validatePasswordPolicy(password);
+  if (policyError) return { error: policyError };
   if (password !== confirm) return { error: "Password and confirmation do not match." };
+
+  const meta = await getRequestMeta();
+  const clientKey = ipKey(meta.ipAddress);
+
+  const burst = await rateLimit(`${SIGNUP_IP_KEY}:${clientKey}`, 10, 60 * 60_000);
+  if (!burst.allowed) return { error: rateLimitMessage(burst.retryAfterSeconds) };
+  const account = await rateLimit(`${SIGNUP_EMAIL_KEY}:${email}`, 3, 60 * 60_000);
+  if (!account.allowed) return { error: rateLimitMessage(account.retryAfterSeconds) };
 
   const existing = await db.user.findUnique({ where: { email }, select: { id: true } });
   if (existing) {
     return { error: "An account with this email already exists. Try signing in instead." };
   }
 
-  const meta = await getRequestMeta();
   const user = await db.user.create({
     data: {
       email,
@@ -166,9 +221,14 @@ export async function changePassword(
   const next = String(formData.get("next") ?? "");
   const confirm = String(formData.get("confirm") ?? "");
 
-  if (next.length < 8) return { error: "New password must be at least 8 characters." };
+  const policyError = validatePasswordPolicy(next);
+  if (policyError) return { error: policyError };
   if (next !== confirm) return { error: "New password and confirmation do not match." };
   if (next === current) return { error: "The new password must be different from the current one." };
+
+  const meta = await getRequestMeta();
+  const throttled = await rateLimit(`${PASSWORD_CHANGE_KEY}:${user.id}`, 5, 10 * 60_000);
+  if (!throttled.allowed) return { error: rateLimitMessage(throttled.retryAfterSeconds) };
 
   const record = await db.user.findUnique({ where: { id: user.id } });
   if (!record) return { error: "Account not found." };
@@ -180,13 +240,18 @@ export async function changePassword(
     where: { id: user.id },
     data: { passwordHash: await hashPassword(next), mustChangePassword: false },
   });
+  // Session rotation: after a password change, every other device is signed
+  // out but the current request gets a freshly minted session so the user
+  // stays signed in.
+  await db.session.deleteMany({ where: { userId: user.id } });
+  await createSession(user.id, meta);
   await writeAudit({
     userId: user.id,
     action: "PASSWORD_CHANGED",
     entityType: "User",
     entityId: user.id,
     entityLabel: user.email,
-    newState: { selfChange: true },
+    newState: { selfChange: true, sessionsRotated: true },
   });
-  return { success: "Your password has been updated." };
+  return { success: "Your password has been updated. Other devices were signed out." };
 }

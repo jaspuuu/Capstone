@@ -13,7 +13,7 @@ import {
   type MonitoredActivity,
   type OrgMonitoring,
 } from "@/lib/monitoring";
-import { ACTIVITY_PHASE_META } from "@/lib/constants";
+import { ACTIVITY_PHASE_META, PROPOSAL_STATUS_META } from "@/lib/constants";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatCard } from "@/components/ui/stat-card";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -260,7 +260,9 @@ export default async function MonitoringPage() {
                                 : ""}
                             </p>
                           </div>
-                          <Badge tone={phaseMeta?.tone ?? "neutral"}>{phaseMeta?.label ?? a.phase ?? a.status}</Badge>
+                          <Badge tone={phaseMeta?.tone ?? PROPOSAL_STATUS_META[a.status]?.tone ?? "neutral"}>
+                            {phaseMeta?.label ?? PROPOSAL_STATUS_META[a.status]?.label ?? a.status}
+                          </Badge>
                         </li>
                       );
                     })}

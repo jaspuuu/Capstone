@@ -4,6 +4,7 @@ import { useActionState, useState } from "react";
 import { Alert } from "@/components/ui/alert";
 import { Field, Input, Select, Textarea } from "@/components/ui/form";
 import { SubmitButton } from "@/components/ui/submit-button";
+import { useExitGuard } from "@/components/unsaved-guard";
 
 type ActionState = { error?: string; success?: string };
 
@@ -40,9 +41,20 @@ export function ActivityForm({
   const [state, formAction] = useActionState<ActionState, FormData>(action, {});
   const [startAt, setStartAt] = useState(initial ? toLocalInput(initial.startAt) : "");
   const [endAt, setEndAt] = useState(initial ? toLocalInput(initial.endAt) : "");
+  const [dirty, setDirty] = useState(false);
+  const [prevState, setPrevState] = useState(state);
+
+  useExitGuard(dirty);
+
+  // Disarm the exit guard only after a successful submit (new action-state
+  // object); a later edit re-arms it, and a failed submit never reaches it.
+  if (prevState !== state) {
+    setPrevState(state);
+    if (state.success) setDirty(false);
+  }
 
   return (
-    <form action={formAction} className="space-y-5">
+    <form action={formAction} onInput={() => setDirty(true)} className="space-y-5">
       {initial?.id && <input type="hidden" name="id" value={initial.id} />}
       {state.error && <Alert tone="danger">{state.error}</Alert>}
 

@@ -19,6 +19,7 @@ import {
   newStoredName,
   saveAttachmentFile,
   validateFile,
+  validateFileBytes,
 } from "@/lib/attachments";
 import { SIGNATORY_LABELS } from "@/lib/form-routes";
 import { deadlineAppliesToOrg } from "@/lib/deadlines";
@@ -275,6 +276,12 @@ export async function uploadFinancialFile(
     if (fileError) return { error: fileError };
 
     const bytes = Buffer.from(await file.arrayBuffer());
+    if (bytes.length === 0 || bytes.length > 10 * 1024 * 1024) {
+      return { error: "Files may not exceed 10 MB." };
+    }
+    const contentError = validateFileBytes(file.type, bytes);
+    if (contentError) return { error: contentError };
+
     const storedName = newStoredName(file.type);
     await saveAttachmentFile(storedName, bytes);
     await db.attachment.create({

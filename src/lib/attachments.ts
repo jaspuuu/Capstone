@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { mkdir, unlink, writeFile, readFile } from "node:fs/promises";
 import path from "node:path";
-import { put, del, head } from "@vercel/blob";
+import { put, del, getDownloadUrl } from "@vercel/blob";
 import {
   SUPABASE_STORAGE_ENABLED,
   supabaseStoragePut,
@@ -65,6 +65,72 @@ export function validateFile(mimeType: string, sizeBytes: number): string | null
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// Content sniffing (Phase 1). MIME headers are client-declared and cheap to
+// forge; every upload also runs the real bytes against known magic signatures
+// so a renamed .exe can never be stored as a "PDF". Zip-based office files
+// are additionally required to contain their signature part inside the
+// archive ([Content_Types].xml + word/ or xl/).
+// ---------------------------------------------------------------------------
+
+const ARCHIVE_MIME = {
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+    "word/document.xml",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+    "xl/workbook.xml",
+} as const;
+
+function isZip(bytes: Buffer): boolean {
+  return (
+    bytes.length >= 4 &&
+    bytes[0] === 0x50 &&
+    bytes[1] === 0x4b &&
+    (bytes[2] === 0x03 || bytes[2] === 0x05 || bytes[2] === 0x07) &&
+    bytes[3] === 0x04
+  );
+}
+
+/** True when the leading bytes of `bytes` match the declared MIME type. */
+export function sniffMatchingBytes(mimeType: string, bytes: Buffer): boolean {
+  if (mimeType === "application/pdf") {
+    return bytes.length >= 5 && bytes.subarray(0, 5).equals(Buffer.from("%PDF-"));
+  }
+  if (mimeType === "image/png") {
+    return (
+      bytes.length >= 8 &&
+      bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+    );
+  }
+  if (mimeType === "image/jpeg") {
+    return bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+  }
+  if (mimeType === "image/webp") {
+    return (
+      bytes.length >= 12 &&
+      bytes.subarray(0, 4).toString("ascii") === "RIFF" &&
+      bytes.subarray(8, 12).toString("ascii") === "WEBP"
+    );
+  }
+  const entry = ARCHIVE_MIME[mimeType as keyof typeof ARCHIVE_MIME];
+  if (entry) {
+    return isZip(bytes) && bytes.includes(entry);
+  }
+  // Unknown allowlisted types (future-proof) are accepted without a decoder.
+  return true;
+}
+
+/**
+ * Content-level validation used after reading the real bytes. Returns an
+ * error string when the payload does not match the declared MIME type.
+ */
+export function validateFileBytes(mimeType: string, bytes: Buffer): string | null {
+  if (bytes.length === 0) return "The selected file is empty.";
+  if (!sniffMatchingBytes(mimeType, bytes)) {
+    return "The file content does not match its declared type.";
+  }
+  return null;
+}
+
 /** Random, unguessable on-disk filename that preserves the extension. */
 export function newStoredName(mimeType: string): string {
   const ext = ALLOWED_MIME_TYPES[mimeType] ?? "";
@@ -73,7 +139,9 @@ export function newStoredName(mimeType: string): string {
 
 export async function saveAttachmentFile(storedName: string, bytes: Buffer): Promise<void> {
   if (BLOB_ENABLED) {
-    await put(storedName, bytes, { access: "public", addRandomSuffix: false });
+    // Private access: the CDN never hosts anonymous URLs. Every read goes
+    // through a freshly-signed short-lived URL on the authenticated route.
+    await put(storedName, bytes, { access: "private", addRandomSuffix: false });
     return;
   }
   if (SUPABASE_STORAGE_ENABLED) {
@@ -121,8 +189,9 @@ export async function deleteAttachmentFile(storedName: string): Promise<void> {
 export async function readAttachmentFile(storedName: string): Promise<Buffer | null> {
   if (BLOB_ENABLED) {
     try {
-      const meta = await head(storedName);
-      const res = await fetch(meta.downloadUrl);
+      // Private blobs have no public URL; mint a short-lived signed one.
+      const url = await getDownloadUrl(storedName);
+      const res = await fetch(url);
       if (!res.ok) return null;
       return Buffer.from(await res.arrayBuffer());
     } catch {

@@ -6,9 +6,11 @@ import { z } from "zod";
 import type { AccountStatus, Role } from "@/generated/prisma/client";
 import { db } from "@/lib/db";
 import { requirePermissionOrThrow } from "@/lib/auth/guards";
-import { hashPassword } from "@/lib/auth/password";
+import { hashPassword, validatePasswordPolicy } from "@/lib/auth/password";
 import { writeAudit } from "@/lib/audit";
 import { isOfficerRole } from "@/lib/constants";
+import { ipKey, rateLimit, rateLimitMessage } from "@/lib/rate-limit";
+import { getRequestMeta } from "@/lib/auth/guards";
 
 export type ActionState = { error?: string; success?: string };
 
@@ -35,7 +37,7 @@ const baseSchema = z.object({
 });
 
 const createSchema = baseSchema.extend({
-  password: z.string().min(8, "Password must be at least 8 characters.").max(72),
+  password: z.string().min(10, "Password must be at least 10 characters.").max(72),
 });
 
 export async function createUser(_prev: ActionState, formData: FormData): Promise<ActionState> {
@@ -57,6 +59,9 @@ export async function createUser(_prev: ActionState, formData: FormData): Promis
     return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
   }
   const d = parsed.data;
+
+  const policyError = validatePasswordPolicy(d.password);
+  if (policyError) return { error: policyError };
 
   // Deans must be attached to a college.
   if (d.role === "DEAN" && !d.collegeId) {
@@ -238,7 +243,11 @@ export async function resetPassword(_prev: ActionState, formData: FormData): Pro
   const id = String(formData.get("id") ?? "");
   const password = String(formData.get("password") ?? "");
 
-  if (password.length < 8) return { error: "Password must be at least 8 characters." };
+  const meta = await getRequestMeta();
+  const throttled = await rateLimit(`admin-reset:ip:${ipKey(meta.ipAddress)}`, 30, 60 * 60_000);
+  if (throttled.allowed === false) return { error: rateLimitMessage(throttled.retryAfterSeconds) };
+  const policyError = validatePasswordPolicy(password);
+  if (policyError) return { error: policyError };
 
   const existing = await db.user.findUnique({ where: { id } });
   if (!existing) return { error: "User not found." };

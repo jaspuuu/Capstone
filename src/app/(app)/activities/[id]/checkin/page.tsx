@@ -5,6 +5,7 @@ import { QrCode } from "lucide-react";
 import { requireUser } from "@/lib/auth/guards";
 import { db } from "@/lib/db";
 import { formatDateTime } from "@/lib/utils";
+import { ATTENDANCE_STATUS_META } from "@/lib/constants";
 import { checkInWindowOpen } from "@/lib/attendance-access";
 import { selfCheckIn } from "@/lib/actions/attendance";
 import { Alert } from "@/components/ui/alert";
@@ -91,11 +92,11 @@ export default async function CheckInPage({
               Only current members of {activity.organization.name} can check in.
             </Alert>
           ) : alreadyIn ? (
-            <Alert tone="success" title={`You are checked in (${record?.status})`}>
+            <Alert tone="success" title={`You are checked in (${ATTENDANCE_STATUS_META[record!.status]?.label ?? record!.status})`}>
               Recorded {formatDateTime(record!.recordedAt)} via QR check-in.
             </Alert>
           ) : record ? (
-            <Alert tone="info" title={`Your attendance is marked ${record.status}`}>
+            <Alert tone="info" title={`Your attendance is marked ${ATTENDANCE_STATUS_META[record.status]?.label ?? record.status}`}>
               Confirming here will update it to your QR scan result.
             </Alert>
           ) : null}

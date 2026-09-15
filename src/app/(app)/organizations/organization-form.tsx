@@ -4,6 +4,7 @@ import { useActionState, useState } from "react";
 import { Field, Input, Select, Textarea } from "@/components/ui/form";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { Alert } from "@/components/ui/alert";
+import { useExitGuard } from "@/components/unsaved-guard";
 import type { ActionState } from "@/lib/actions/organizations";
 
 type Option = { id: string; label: string };
@@ -48,11 +49,24 @@ export function OrganizationForm({
   const [state, formAction] = useActionState<ActionState, FormData>(action, {});
   const [type, setType] = useState(initial?.type ?? "INDEPENDENT");
   const [collegeId, setCollegeId] = useState(initial?.collegeId ?? "");
+  const [dirty, setDirty] = useState(false);
+  const [prevState, setPrevState] = useState(state);
+
+  useExitGuard(dirty);
+
+  // Adjust state during render: when the last submit succeeded (new action-state
+  // object), the fields are saved, so disarm the exit guard. A later edit
+  // re-arms it via onInput; a failed submit leaves a fresh error object that
+  // does not reach the success branch.
+  if (prevState !== state) {
+    setPrevState(state);
+    if (state.success && !state.error) setDirty(false);
+  }
 
   const deptOptions = departments.filter((d) => !collegeId || d.collegeId === collegeId);
 
   return (
-    <form action={formAction} className="space-y-5">
+    <form action={formAction} onInput={() => setDirty(true)} className="space-y-5">
       {initial?.id && <input type="hidden" name="id" value={initial.id} />}
       {state.error && <Alert tone="danger">{state.error}</Alert>}
 

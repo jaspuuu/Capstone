@@ -3,6 +3,7 @@ import { getSessionUser } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { readAttachmentFile, safeDownloadName } from "@/lib/attachments";
 import { canViewAttachments, loadAttachableParent } from "@/lib/attachment-access";
+import { writeAudit } from "@/lib/audit";
 
 /**
  * Authenticated attachment downloads. Files are never web-served directly;
@@ -29,6 +30,16 @@ export async function GET(
 
   const bytes = await readAttachmentFile(attachment.storedName);
   if (!bytes) return new NextResponse("File missing", { status: 410 });
+
+  // Record access; never blocks the download when auditing fails.
+  writeAudit({
+    userId: user.id,
+    action: "ATTACHMENT_DOWNLOADED",
+    entityType: attachment.entityType,
+    entityId: attachment.entityId,
+    entityLabel: attachment.fileName,
+    newState: { sizeBytes: bytes.length, mimeType: attachment.mimeType },
+  }).catch(() => undefined);
 
   return new NextResponse(new Uint8Array(bytes), {
     headers: {

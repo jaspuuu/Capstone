@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Save } from "lucide-react";
 import { FORM_DRAFT_FIELDS, type FormDraftData } from "@/lib/form-draft-data";
@@ -21,6 +21,7 @@ export function FormFieldsEditor({
   initial,
   activeField,
   onActiveField,
+  onDirtyChange,
 }: {
   formKey: string;
   organizationId: string;
@@ -28,10 +29,12 @@ export function FormFieldsEditor({
   initial: FormDraftData;
   activeField?: string | null;
   onActiveField?: (key: string | null) => void;
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
   const [values, setValues] = useState<FormDraftData>(initial);
   const [state, action] = useActionState(saveFormDraft, EMPTY);
   const router = useRouter();
+  const lastReported = useRef<boolean | null>(null);
 
   // A saved draft bumps FormDocument.version, so the page's pdfHref/docxHref
   // (which carry `&v=<version>`) must be re-fetched or the rendered PDF stays
@@ -39,6 +42,17 @@ export function FormFieldsEditor({
   useEffect(() => {
     if (state.ok) router.refresh();
   }, [state.ok, router]);
+
+  // Surface unsaved-edit state so the workspace can guard navigation.
+  useEffect(() => {
+    const dirty =
+      FORM_DRAFT_FIELDS.some(
+        ({ key }) => (values[key] ?? "") !== (initial[key] ?? "")
+      ) || false;
+    if (dirty === lastReported.current && lastReported.current !== null) return;
+    lastReported.current = dirty;
+    onDirtyChange?.(dirty);
+  }, [values, initial, onDirtyChange]);
 
   const set = (key: keyof FormDraftData, value: string) =>
     setValues((prev) => ({ ...prev, [key]: value === "" ? undefined : value }));

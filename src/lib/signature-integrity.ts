@@ -61,6 +61,33 @@ export function signatureContentHash(payload: string): string {
   return createHash("sha256").update(payload).digest("hex");
 }
 
+/**
+ * Canonical sha256 of an arbitrary JSON value: object keys are sorted
+ * recursively so two logically-equal objects always hash identically
+ * regardless of key order in the stored JSON. Used to snapshot the resolved
+ * document data at sign time (`documentDataHash`).
+ */
+export function canonicalJsonHash(value: unknown): string {
+  const digest = createHash("sha256");
+  digest.update(stableJsonStringify(value));
+  return digest.digest("hex");
+}
+
+/** Recursively stringify with sorted object keys and no insignificant whitespace. */
+function stableJsonStringify(value: unknown): string {
+  if (value === null || value === undefined) return "null";
+  if (Array.isArray(value)) return `[${value.map(stableJsonStringify).join(",")}]`;
+  if (typeof value === "string") return JSON.stringify(value);
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (value instanceof Date) return JSON.stringify(value.toISOString());
+  const obj = value as Record<string, unknown>;
+  return `{${Object.keys(obj)
+    .filter((k) => obj[k] !== undefined)
+    .sort()
+    .map((k) => `${JSON.stringify(k)}:${stableJsonStringify(obj[k])}`)
+    .join(",")}}`;
+}
+
 /** sha256(current step's commitment + previous link). */
 export function hashChainStep(params: {
   role: string;

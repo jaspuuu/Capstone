@@ -116,6 +116,21 @@ model Session {
   @@index([userId])
 }
 
+// Fixed-window rate limiting buckets (Phase 1 security hardening). Stored in
+// the database so counters survive across serverless instances. Any server
+// action can bucket by key (e.g. "{ip}:login", "{email}:password-attempt").
+// Buckets reset lazily — once the window has elapsed the count is zeroed
+// instead of the caller being rejected.
+model RateLimitBucket {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  count     Int      @default(1)
+  resetAt   DateTime
+  updatedAt DateTime @updatedAt
+
+  @@index([resetAt])
+}
+
 // ---------------------------------------------------------------------------
 // Academic structure
 // ---------------------------------------------------------------------------
@@ -721,6 +736,11 @@ model SignatureStep {
   contentHash     String?
   prevChainHash   String?
   chainHash       String?
+  // Canonical sha256 of the resolved FormDocument.data at the moment of
+  // signing (SF routes only). Export verifies the CURRENT data still matches
+  // this snapshot — if the document content was altered after signing, the
+  // signature is flagged as invalidated.
+  documentDataHash String?
 
   @@unique([routeId, order])
   @@index([routeId, status])

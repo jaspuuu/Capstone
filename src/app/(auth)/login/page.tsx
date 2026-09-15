@@ -14,6 +14,12 @@ const GOOGLE_ERRORS: Record<string, string> = {
     "Google sign-in is not configured yet. Use your email and password, or contact the OSAS administrator.",
   google_failed:
     "Google sign-in failed or was cancelled. Try again or sign in with your email and password.",
+  rate_limited: "Too many attempts. Please try again in a few minutes.",
+};
+
+const NOTICES: Record<string, string> = {
+  sessions_revoked:
+    "You have been signed out of all devices. You can sign in again below.",
 };
 
 function GoogleIcon() {
@@ -42,9 +48,9 @@ function GoogleIcon() {
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ next?: string; error?: string }>;
+  searchParams: Promise<{ next?: string; error?: string; notice?: string }>;
 }) {
-  const { next, error } = await searchParams;
+  const { next, error, notice } = await searchParams;
 
   // Validated sign-in check: only redirect when the session is actually
   // alive (a stale cookie simply renders the form again).
@@ -122,6 +128,12 @@ export default async function LoginPage({
           {error && GOOGLE_ERRORS[error] && (
             <Alert tone="danger" className="mb-4">
               {GOOGLE_ERRORS[error]}
+            </Alert>
+          )}
+
+          {notice && NOTICES[notice] && (
+            <Alert tone="info" className="mb-4">
+              {NOTICES[notice]}
             </Alert>
           )}
 

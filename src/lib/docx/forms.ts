@@ -1,6 +1,11 @@
 import "server-only";
-import { readFile, stat } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
+import {
+  MASTER_FILES,
+  MASTER_HASHES,
+} from "@/lib/docx/masters";
 import {
   addImagePart,
   esc,
@@ -51,14 +56,7 @@ export type FormData = {
   members?: Array<{ name: string; studentNo?: string; courseYearSection?: string; sig?: SignatureBytes | null }>;
 };
 
-export const MASTER_FILES: Record<string, string> = {
-  SF001: "001-APPLICATION-FOR-RECOGNITION-OR-RENEWAL-OF-ACCREDITED-STUDENT-ORGANIZATION.docx",
-  SF002: "002-RENEWAL-FORM.docx",
-  SF003: "005-COMMITMENT-FORM.docx",
-  SF004: "004-PLAN-OF-ACTIVITIES.docx",
-  SF005: "007-LIST-OF-MEMBERS.docx",
-  SF006: "006-CERTIFICATION.docx",
-};
+export { MASTER_FILES, MASTER_HASHES } from "@/lib/docx/masters";
 
 const OFFICER_SOA_LEGACY = "AL JOHN A. VILLAREAL";
 const OFFICER_OSAS_LEGACY = "ALBERTO B. CASTILLO, EdD";
@@ -98,6 +96,7 @@ export type MasterTemplateInfo = {
   exists: boolean;
   size: number;
   isDocx: boolean;
+  sha256: string;
 };
 
 export function masterTemplatePath(formKey: string): string {
@@ -109,21 +108,36 @@ export function masterTemplatePath(formKey: string): string {
 
 /**
  * Verifies the registered master for a form exists, is readable, is non-empty,
- * and actually looks like a DOCX (ZIP "PK" signature). The master is read-only
- * here — generation works on an in-memory copy and never writes to this file.
+ * looks like a DOCX (ZIP "PK" signature), AND hashes to the published SHA-256
+ * manifest. The master is read-only here — generation works on an in-memory
+ * copy and never writes to this file.
  */
 export async function verifyMasterTemplate(formKey: string): Promise<MasterTemplateInfo> {
   const path = masterTemplatePath(formKey);
   try {
-    const st = await stat(path);
-    if (st.size === 0) {
+    const bytes = await readFile(path);
+    if (bytes.length === 0) {
       throw new DocxGenerationError("template_read", `Master template is empty: ${path}`);
     }
-    const head = (await readFile(path)).subarray(0, 2).toString();
-    if (head !== "PK") {
+    if (bytes.subarray(0, 2).toString() !== "PK") {
       throw new DocxGenerationError("template_read", `Master template is not a valid DOCX (bad ZIP signature): ${path}`);
     }
-    return { path, exists: true, size: st.size, isDocx: true };
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    const expected = MASTER_HASHES[formKey];
+    if (!expected) {
+      throw new DocxGenerationError(
+        "template_read",
+        `No SHA-256 manifest entry registered for ${formKey} — refusing to generate from an unverified template.`
+      );
+    }
+    if (sha256 !== expected) {
+      throw new DocxGenerationError(
+        "template_tamper",
+        `Master template for ${formKey} does not match the official SHA-256 manifest (got ${sha256}, expected ${expected}). ` +
+          `The official template must not be modified; generation is blocked to avoid printing a non-official document.`
+      );
+    }
+    return { path, exists: true, size: bytes.length, isDocx: true, sha256 };
   } catch (err) {
     if (err instanceof DocxGenerationError) throw err;
     throw new DocxGenerationError(

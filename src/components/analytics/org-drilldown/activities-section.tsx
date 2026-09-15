@@ -7,6 +7,7 @@ import { TableWrap, THead, TH, TR, TD } from "@/components/ui/table";
 import { NoData } from "@/components/analytics/analytics-parts";
 import { attendanceRate, type OrgMonitoring } from "@/lib/monitoring";
 import { budgetUtilizationPct } from "@/lib/analytics";
+import { PROPOSAL_STATUS_META } from "@/lib/constants";
 
 export type DrillActivitiesProps = {
   mon: OrgMonitoring;
@@ -42,8 +43,8 @@ export function DrillActivities(p: DrillActivitiesProps) {
                       </Link>
                     </TD>
                     <TD className="min-w-32">
-                      <Badge tone={a.status === "APPROVED" ? "success" : a.status === "REJECTED" ? "danger" : a.status === "RETURNED" ? "warning" : "info"}>
-                        {a.status}
+                      <Badge tone={PROPOSAL_STATUS_META[a.status]?.tone ?? "info"}>
+                        {PROPOSAL_STATUS_META[a.status]?.label ?? a.status}
                       </Badge>
                     </TD>
                     <TD className="min-w-20 tabular-nums">

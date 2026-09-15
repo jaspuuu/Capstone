@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import { ChangePasswordForm } from "./change-password-form";
+import { SignOutAllButton } from "./sign-out-all-button";
 export const instant = false;
 
 export const metadata: Metadata = { title: "My profile" };
@@ -98,6 +99,16 @@ export default async function ProfilePage() {
                 <dd className="text-content">{formatDateTime(user.lastLoginAt)}</dd>
               </div>
             </dl>
+
+            <div className="mt-5 border-t border-line pt-4">
+              <h3 className="mb-2 text-xs font-bold tracking-wide text-content-secondary uppercase">
+                Sessions
+              </h3>
+              <p className="mb-3 text-sm text-content-secondary">
+                Revokes every active session at once. You will be signed in again from this device.
+              </p>
+              <SignOutAllButton />
+            </div>
 
             {memberships.length > 0 && (
               <div className="mt-5 border-t border-line pt-4">

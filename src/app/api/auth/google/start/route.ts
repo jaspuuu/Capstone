@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
 import { isHttpsRequest } from "@/lib/auth/cookie";
+import { ipKey, rateLimit, rateLimitMessage } from "@/lib/rate-limit";
 
 /**
  * Starts the Google OAuth flow. Requires GOOGLE_CLIENT_ID and
@@ -14,6 +15,18 @@ export async function GET(request: Request) {
 
   if (!clientId || !clientSecret) {
     return NextResponse.redirect(new URL("/login?error=google_unconfigured", origin));
+  }
+
+  // Rate-limit: 20 initiations per IP per hour — well above normal usage.
+  const clientKey = ipKey(
+    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+      request.headers.get("x-real-ip")
+  );
+  const throttled = await rateLimit(`oauth:ip:${clientKey}`, 20, 60 * 60_000);
+  if (!throttled.allowed) {
+    return NextResponse.redirect(
+      new URL(`/login?error=rate_limited&message=${encodeURIComponent(rateLimitMessage(throttled.retryAfterSeconds))}`, origin)
+    );
   }
 
   // Only relative next paths survive (open-redirect guard).

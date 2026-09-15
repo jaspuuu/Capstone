@@ -12,6 +12,7 @@ import {
   newStoredName,
   saveAttachmentFile,
   validateFile,
+  validateFileBytes,
   type AttachmentKind,
 } from "@/lib/attachments";
 import {
@@ -79,6 +80,8 @@ export async function uploadAttachment(
   if (bytes.length === 0 || bytes.length > 10 * 1024 * 1024) {
     return { error: "Files may not exceed 10 MB." };
   }
+  const contentError = validateFileBytes(file.type, bytes);
+  if (contentError) return { error: contentError };
 
   const storedName = newStoredName(file.type);
   const notes = String(formData.get("notes") ?? "").trim().slice(0, 500) || null;

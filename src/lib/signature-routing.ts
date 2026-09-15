@@ -9,6 +9,7 @@ import {
   resolveSigners,
   type SignatureStatusDetail,
 } from "@/lib/signature-policy";
+import { canonicalJsonHash } from "@/lib/signature-integrity";
 
 // ---------------------------------------------------------------------------
 // Signature routing core (§9 strict sequencing). Authority is delegated to the
@@ -111,4 +112,36 @@ export async function authorizeCurrentSigner(params: {
   userId: string;
 }) {
   return authorizeStepForUser(params);
+}
+
+/**
+ * Export-time tamper check (§ integrity): every SIGNED step captured a
+ * canonical snapshot of the resolved FormDocument.data at signing. If the
+ * current data no longer matches a signed step's snapshot, the stored content
+ * was altered after the signature was applied — the signature is invalidated.
+ *
+ * Returns the list of roles whose snapshot diverges (empty ⇒ intact). The
+ * route state is derived from the DB; signed steps without a snapshot (legacy
+ * or non-SF entities) are ignored.
+ */
+export async function findSignedDataDrift(formKey: string, orgId: string, ay: string) {
+  const route = await db.signatureRoute.findUnique({
+    where: { entityType_entityId: { entityType: "SF", entityId: sfRouteEntityId(formKey, orgId, ay) } },
+    include: {
+      steps: {
+        where: { status: "SIGNED", documentDataHash: { not: null } },
+        select: { role: true, documentDataHash: true },
+      },
+    },
+  });
+  if (!route || route.steps.length === 0) return [];
+
+  const doc = await db.formDocument.findUnique({
+    where: { formKey_organizationId_academicYear: { formKey, organizationId: orgId, academicYear: ay } },
+    select: { data: true },
+  });
+  const current = doc ? canonicalJsonHash(doc.data) : null;
+  if (current === null) return route.steps.map((s) => s.role); // document gone/never existed
+
+  return route.steps.filter((s) => s.documentDataHash !== null && s.documentDataHash !== current).map((s) => s.role);
 }

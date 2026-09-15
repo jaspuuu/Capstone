@@ -15,6 +15,7 @@ import {
 } from "@/lib/signature-policy";
 import { writeAudit } from "@/lib/audit";
 import {
+  canonicalJsonHash,
   hashChainStep,
   signatureContentHash,
   signatureContentPayload,
@@ -91,6 +92,18 @@ export async function signCurrentStep(
       })
     );
 
+    // Canonical snapshot of the resolved document data at the moment of
+    // signing (SF routes). A later edit to the same FormDocument.data is
+    // detected at export because the stored hash won't match.
+    let documentDataHash: string | null = null;
+    if (route.entityType === "SF") {
+      const doc = await db.formDocument.findUnique({
+        where: { formKey_organizationId_academicYear: { formKey: route.formKey, organizationId: org.id, academicYear: org.academicYear } },
+        select: { data: true },
+      });
+      if (doc) documentDataHash = canonicalJsonHash(doc.data);
+    }
+
     let nextInChain: { id: string; role: string } | null = null;
 
     await db.$transaction(async (tx) => {
@@ -122,6 +135,7 @@ await tx.signatureStep.update({
           contentHash,
           prevChainHash: prev?.chainHash ?? null,
           chainHash,
+          documentDataHash,
         },
       });
 
@@ -363,6 +377,7 @@ export async function resetRouteForResubmit(routeId: string) {
         contentHash: null,
         prevChainHash: null,
         chainHash: null,
+        documentDataHash: null,
       },
     });
     const newFirst = await tx.signatureStep.findFirst({

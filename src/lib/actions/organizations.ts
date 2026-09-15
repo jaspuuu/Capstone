@@ -10,7 +10,7 @@ import { requirePermissionOrThrow, requireUser } from "@/lib/auth/guards";
 import { writeAudit } from "@/lib/audit";
 import { notifyOrgOfficers, notifyUsers } from "@/lib/notifications";
 import { currentAcademicYear, formatDateTime } from "@/lib/utils";
-import { saveAttachmentFile, deleteAttachmentFile } from "@/lib/attachments";
+import { saveAttachmentFile, deleteAttachmentFile, sniffMatchingBytes } from "@/lib/attachments";
 import { ORG_APPLICATION_WORKFLOW } from "@/lib/workflow";
 import { orgAppRequirements, orgAppSubmissionGaps } from "@/lib/org-application";
 import {
@@ -70,6 +70,8 @@ async function readLogo(
   if (!ext) return "invalid";
   if (file.size > MAX_LOGO_BYTES) return "invalid";
   const bytes = Buffer.from(await file.arrayBuffer());
+  // Content validation: the bytes must actually be the declared image format.
+  if (!sniffMatchingBytes(file.type, bytes)) return "invalid";
   return { storedName: `${randomBytes(24).toString("hex")}${ext}`, bytes };
 }
 

@@ -33,7 +33,7 @@ import {
 } from "@/lib/analytics";
 import { attendanceRate, monitorOrg } from "@/lib/monitoring";
 import { RECOGNITION_WORKFLOW, inFlightStatuses } from "@/lib/workflow";
-import { RECOGNITION_STATUS_META } from "@/lib/constants";
+import { RECOGNITION_STATUS_META, ATTENDANCE_STATUS_META } from "@/lib/constants";
 import { FIN_META, deadlineAppliesLite } from "@/lib/analytics-ui";
 import { buildAnalyticsSnapshotMemo } from "@/lib/analytics-loader";
 import { PageHeader } from "@/components/ui/page-header";
@@ -148,7 +148,9 @@ export default async function AnalyticsPage({
                           {a.activity.organization.acronym ?? a.activity.organization.name} · {formatDate(a.activity.startAt)}
                         </span>
                       </div>
-                      <Badge tone={a.status === "PRESENT" || a.status === "LATE" ? "success" : "neutral"}>{a.status}</Badge>
+                      <Badge tone={ATTENDANCE_STATUS_META[a.status]?.tone ?? "neutral"}>
+                        {ATTENDANCE_STATUS_META[a.status]?.label ?? a.status}
+                      </Badge>
                     </li>
                   ))}
                 </ul>

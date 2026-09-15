@@ -121,7 +121,7 @@ export const ORG_APPLICATION_WORKFLOW: WorkflowDef<OrgApplicationStatus> = {
     { status: "DRAFT", label: "Draft" },
     { status: "SUBMITTED", label: "For Review" },
     { status: "UNDER_REVIEW", label: "Adviser Review" },
-    { status: "FOR_SIGNATURE", label: "Dean Review" },
+    { status: "FOR_SIGNATURE", label: "Ready for Review" },
     { status: "FOR_APPROVAL", label: "SOA Review" },
     { status: "APPROVED", label: "OSAS Approval" },
     { status: "RECOGNIZED", label: "Recognized" },
@@ -149,7 +149,7 @@ export const ORG_APPLICATION_WORKFLOW: WorkflowDef<OrgApplicationStatus> = {
       next: "Dean review",
     },
     FOR_SIGNATURE: {
-      label: "Dean Review",
+      label: "Ready for Review",
       role: "DEAN",
       roleLabel: "College Dean",
       action: "Review and sign the application",

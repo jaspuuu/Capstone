@@ -485,6 +485,190 @@ async function main() {
     console.log("Recognitions for AY %s already present — skipping lifecycle seed.", AY_CUR);
   }
 
+  // ------------------------------------ In-flight recognition scenarios
+  // Defense demo cases beside the happy path: one current-AY application that
+  // was RETURNED for revision (with the reviewer's note preserved) and one
+  // that is still awaiting review. Idempotent by org acronym.
+  const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000);
+  const daysAhead = (n: number) => new Date(Date.now() + n * 86_400_000);
+  const inflightOrg = async (acronym: string, name: string, description: string) => {
+    const existing = await prisma.organization.findFirst({ where: { acronym }, select: { id: true } });
+    if (existing) return existing.id;
+    const created = await prisma.organization.create({
+      data: {
+        acronym,
+        name,
+        description,
+        type: "CHILD",
+        parentId: ccsSbo.id,
+        collegeId: ccs.id,
+        status: "ACTIVE",
+        applicationStatus: "DRAFT",
+        foundedYear: 2023,
+      },
+    });
+    await prisma.organizationMember.createMany({
+      data: [
+        { organizationId: created.id, userId: presidentAcs.id, position: "PRESIDENT", status: "ACTIVE", academicYear: AY_CUR },
+        { organizationId: created.id, userId: secretaryJpia.id, position: "SECRETARY", status: "ACTIVE", academicYear: AY_CUR },
+        { organizationId: created.id, userId: member1.id, position: "TREASURER", status: "ACTIVE", academicYear: AY_CUR },
+      ],
+      skipDuplicates: true,
+    });
+    await prisma.adviserAssignment.create({
+      data: {
+        organizationId: created.id,
+        adviserId: adviserRegular.id,
+        type: "REGULAR",
+        academicYear: AY_CUR,
+        isCurrent: true,
+      },
+    });
+    return created.id;
+  };
+  const inFlightRecognition = async (orgId: string, acronym: string, scenario: "RETURNED" | "SUBMITTED") => {
+    const existing = await prisma.recognition.findFirst({
+      where: { organizationId: orgId, academicYear: AY_CUR },
+      select: { id: true },
+    });
+    if (existing) return;
+    const status = scenario === "RETURNED" ? "RETURNED" : "SUBMITTED";
+    const submittedAt = daysAgo(20);
+    const reviewedAt = daysAgo(9);
+    const remarks =
+      scenario === "RETURNED"
+        ? "Application returned for revision: the objectives listing and the roster column must be aligned with the official template."
+        : "Application submitted and awaiting the adviser's initial review.";
+    const rec = await prisma.recognition.create({
+      data: {
+        organizationId: orgId,
+        academicYear: AY_CUR,
+        kind: "INITIAL",
+        status,
+        submittedAt,
+        reviewedAt: scenario === "RETURNED" ? reviewedAt : null,
+        decidedAt: null,
+        remarks,
+      },
+    });
+    await prisma.organization.update({
+      where: { id: orgId },
+      data: { applicationStatus: scenario === "RETURNED" ? "RETURNED" : "SUBMITTED" },
+    });
+    const events: EventInput[] = [
+      { recognitionId: rec.id, actorId: osas.id, action: "CREATED", toStatus: "DRAFT", createdAt: daysAgo(24) },
+      { recognitionId: rec.id, actorId: presidentAcs.id, action: "SUBMITTED", fromStatus: "DRAFT", toStatus: "SUBMITTED", createdAt: submittedAt },
+    ];
+    if (scenario === "RETURNED") {
+      events.push(
+        {
+          recognitionId: rec.id,
+          actorId: deanCcs.id,
+          action: "STARTED_REVIEW",
+          fromStatus: "SUBMITTED",
+          toStatus: "UNDER_REVIEW",
+          createdAt: daysAgo(10),
+        },
+        {
+          recognitionId: rec.id,
+          actorId: deanCcs.id,
+          action: "RETURNED",
+          fromStatus: "UNDER_REVIEW",
+          toStatus: "RETURNED",
+          note: "Objectives listing and roster column must be aligned with the official template. Revise then resubmit.",
+          createdAt: reviewedAt,
+        },
+      );
+      await prisma.recognitionFollowUp.create({
+        data: {
+          recognitionId: rec.id,
+          expectedDate: daysAhead(3),
+          status: "CONTACTED",
+        },
+      });
+    }
+    await prisma.recognitionEvent.createMany({ data: events });
+    console.log(`Seeded ${scenario} recognition demo for ${acronym} (AY ${AY_CUR}).`);
+  };
+
+  const techCircleId = await inflightOrg(
+    "TECHCIRCLE",
+    "Tech Circle",
+    "Sub-organization of CCS-SBO for software craftsmanship and industry-readiness programs. Demo: current-AY application returned for revision.",
+  );
+  await inFlightRecognition(techCircleId, "TECHCIRCLE", "RETURNED");
+
+  const esportsId = await inflightOrg(
+    "ESPORTSCLUB",
+    "Esports Club",
+    "Sub-organization of CCS-SBO for competitive gaming and collegiate esports events. Demo: current-AY application awaiting review.",
+  );
+  await inFlightRecognition(esportsId, "ESPORTSCLUB", "SUBMITTED");
+
+  // --------------------------------------------------- Scenario notifications
+  // A few seeded, pre-expiring notifications so the notification center (and
+  // the "why am I seeing this" reason) is demonstrable on first login. Keys are
+  // unique per recipient so re-seeding never duplicates.
+  const seededNotif = async (userId: string, row: {
+    type: string;
+    title: string;
+    body: string;
+    link?: string;
+    organizationId?: string;
+    academicYear?: string;
+    reason: string;
+    priority: "ACTION_REQUIRED" | "ATTENTION" | "SUCCESS" | "INFO";
+    category: "SIGNATURE" | "APPROVAL" | "DEADLINE" | "SYSTEM" | "ACTIVITY" | "REVISION";
+    dedupKey: string;
+  }) => {
+    await prisma.notification.upsert({
+      where: { dedupKey: row.dedupKey },
+      update: {},
+      create: { userId, ...row, entityType: "Recognition" },
+    });
+  };
+  await seededNotif(presidentAcs.id, {
+    type: "RECOGNITION_RETURNED",
+    category: "REVISION",
+    priority: "ATTENTION",
+    title: "Tech Circle application returned for revision",
+    body: "The claim reviewer returned your application. Align the objectives listing and roster column with the official template, then resubmit.",
+    link: `/organizations/${techCircleId}/accreditation`,
+    organizationId: techCircleId,
+    academicYear: AY_CUR,
+    reason: "Your organization's current-AY application was returned by the reviewer and needs action.",
+    dedupKey: `SEED:RETURNED:${techCircleId}:${AY_CUR}`,
+  });
+  await seededNotif(secretaryJpia.id, {
+    type: "RECOGNITION_RETURNED",
+    category: "REVISION",
+    priority: "ACTION_REQUIRED",
+    title: "Tech Circle application returned for revision",
+    body: "Your organization's application was returned for revision. Review the note and resubmit before the deadline.",
+    link: `/organizations/${techCircleId}/accreditation`,
+    organizationId: techCircleId,
+    academicYear: AY_CUR,
+    reason: "You are the Secretary of Tech Circle, which holds a returned application for this academic year.",
+    dedupKey: `SEED:RETURNED:SEC:${techCircleId}:${AY_CUR}`,
+  });
+  const renewalDeadline = await prisma.deadline.findFirst({
+    where: { process: "RENEWAL", academicYear: AY_CUR },
+    select: { id: true, dueDate: true, name: true },
+  });
+  if (renewalDeadline) {
+    await seededNotif(presidentAcs.id, {
+      type: "DEADLINE_REMINDER",
+      category: "DEADLINE",
+      priority: "ATTENTION",
+      title: `Due soon: ${renewalDeadline.name}`,
+      body: `The renewal submission window closes on ${renewalDeadline.dueDate.toDateString()}. Review your renewals today.`,
+      link: "/financial",
+      academicYear: AY_CUR,
+      reason: "You hold a leadership position in organizations whose recognition renewal is due this academic year.",
+      dedupKey: `SEED:DEADLINE:${renewalDeadline.id}:${AY_CUR}`,
+    });
+  }
+
   // Recognized last AY only — drive the PENDING_RENEWAL demo (Scenario C).
   const apdevRenewalTarget = await prisma.organization.findFirst({ where: { acronym: "APDEV" } });
   if (apdevRenewalTarget) {
@@ -600,8 +784,8 @@ async function main() {
         name: "Renewal of Recognition AY 2026-2027",
         process: "RENEWAL",
         academicYear: AY_CUR,
-        startDate: new Date("2026-08-03T08:00:00+08:00"),
-        dueDate: new Date("2026-09-15T17:00:00+08:00"),
+        startDate: daysAgo(30),
+        dueDate: daysAhead(14),
         scopeType: "ALL",
         instructions:
           "Submit the complete renewal packet through the system: updated officer roster, adviser endorsement, and general program of activities.",
@@ -611,8 +795,8 @@ async function main() {
         name: "Initial Recognition Applications AY 2026-2027",
         process: "RECOGNITION",
         academicYear: AY_CUR,
-        startDate: new Date("2026-09-01T08:00:00+08:00"),
-        dueDate: new Date("2026-10-30T17:00:00+08:00"),
+        startDate: daysAgo(7),
+        dueDate: daysAhead(45),
         scopeType: "ALL",
         instructions:
           "New organizations seeking initial recognition must complete the application form and attach founding documents.",
@@ -622,8 +806,8 @@ async function main() {
         name: "First Semester Activity Proposals",
         process: "ACTIVITY",
         academicYear: AY_CUR,
-        startDate: new Date("2026-10-01T08:00:00+08:00"),
-        dueDate: new Date("2026-11-15T17:00:00+08:00"),
+        startDate: daysAhead(14),
+        dueDate: daysAhead(60),
         scopeType: "ALL",
       },
       {
@@ -631,8 +815,8 @@ async function main() {
         name: "Accomplishment Reports AY 2025-2026 (CLOSED)",
         process: "ACCOMPLISHMENT",
         academicYear: AY_PREV,
-        startDate: new Date("2026-06-01T08:00:00+08:00"),
-        dueDate: new Date("2026-07-15T17:00:00+08:00"),
+        startDate: daysAgo(110),
+        dueDate: daysAgo(64),
         scopeType: "ALL",
         isActive: false,
       },

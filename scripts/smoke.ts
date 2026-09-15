@@ -279,6 +279,40 @@ async function main() {
   const anon = await fetch(`${BASE}/analytics`, { redirect: "manual" });
   rec("anon /analytics redirected to login", anon.status === 307 || anon.status === 308, `status=${anon.status}`);
 
+  // ---- Role escalation: unauthorized roles are FORBIDDEN on admin routes ----
+  // requirePermission() rejects a logged-in-but-unauthorized user. Next 16
+  // serves this as an HTTP redirect (307) or, for streamed shell responses, as
+  // a <meta http-equiv="refresh" content="1;url=/forbidden"> inside the page —
+  // either way the browser lands on /forbidden and the admin page never renders.
+  const ADMIN_ONLY: Array<{ path: string; content: string }> = [
+    { path: "/users", content: "Create and manage system accounts." },
+    { path: "/users/new", content: "Provision base accounts" },
+    { path: "/colleges", content: "Academic units that scope deans" },
+    { path: "/audit-log", content: "Immutable record of every significant action" },
+    { path: "/deadlines/new", content: "Published deadlines drive the relevant workflows" },
+  ];
+  for (const roleName of ["MEMBER", "ADVISER"]) {
+    const token = tokens[roleName];
+    for (const { path, content } of ADMIN_ONLY) {
+      const res = await fetch(`${BASE}${path}`, {
+        headers: { Cookie: `organize_session=${token}` },
+        redirect: "manual",
+      });
+      const body = await res.text();
+      const loc = res.headers.get("location") ?? "";
+      const httpRedirect = (res.status === 307 || res.status === 308) && loc.includes("/forbidden");
+      const metaRedirect = res.status === 200 && body.includes("__next-page-redirect") && body.includes("/forbidden");
+      rec(`${roleName} ${path} is escalation-forbidden`, httpRedirect || metaRedirect, `status=${res.status} forced=${httpRedirect || metaRedirect}`);
+      rec(`${roleName} ${path} never renders admin content`, !body.includes(content), `marker="${content.slice(0, 24)}"`);
+    }
+  }
+  const forbiddenPage = await fetch(`${BASE}/forbidden`, {
+    headers: { Cookie: `organize_session=${tokens.MEMBER}` },
+    redirect: "manual",
+  });
+  const forbiddenHtml = await forbiddenPage.text();
+  rec("forbidden page renders a clear notice", forbiddenPage.status === 200 && forbiddenHtml.includes("Access restricted"), `status=${forbiddenPage.status}`);
+
   // ---- Signature-chain integrity unit test (in-memory) ----------------------
   const CONTENT = signatureContentHash(
     signatureContentPayload({ entityType: "SF", entityId: "sf:org:ay", formKey: "sf", title: null, version: 1, orgId: "org", academicYear: "ay" }),

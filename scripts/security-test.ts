@@ -1,8 +1,8 @@
 import "dotenv/config";
 import { createHash, randomBytes } from "node:crypto";
 import { PrismaPg } from "@prisma/adapter-pg";
-import { PrismaClient } from "../src/generated/prisma/client";
-import { authorizeStepForUser, canUserSign, describeSignatureStatus } from "../src/lib/signature-policy";
+import { PrismaClient, SignatoryRole } from "../src/generated/prisma/client";
+import { authorizeStepForUser, canUserSign } from "../src/lib/signature-policy";
 
 // ---------------------------------------------------------------------------
 // SIGNATURE AUTHORIZATION SECURITY TESTS (§30 acceptance criteria).
@@ -65,7 +65,7 @@ async function createFreshRoute(formKey: string, orgId: string, roles: string[])
       steps: {
         create: roles.map((r, i) => ({
           order: i + 1,
-          role: r as any,
+          role: r as SignatoryRole,
           status: i === 0 ? "CURRENT" : "LOCKED",
         })),
       },
@@ -76,16 +76,33 @@ async function createFreshRoute(formKey: string, orgId: string, roles: string[])
 
 async function main() {
   const orgA = await prisma.organization.findFirst({ where: { acronym: "CCS-SBO" } });
-  const orgB = await prisma.organization.findFirst({ where: { acronym: "APDEV" } });
-  if (!orgA || !orgB) throw new Error("missing fixture orgs");
   const presA = await findUser("president.acs@lspu.edu.ph");
   const memberA = await findUser("member1.acs@lspu.edu.ph");
   const adviserA = await prisma.user.findFirst({ where: { email: "adviser.regular@lspu.edu.ph" } });
-  if (!adviserA) throw new Error("missing adviser.regular");
+  if (!orgA || !adviserA) throw new Error("missing fixture org or adviser.regular");
 
-  const routeA = await createFreshRoute("SF003", orgA.id, ["PRESIDENT", "SECRETARY", "SENIOR_ADVISER", "DEAN"]);
-  const routeB = await createFreshRoute("SF003", orgB.id, ["PRESIDENT", "SECRETARY", "SENIOR_ADVISER", "DEAN"]);
-  const routeC = await createFreshRoute("SF006", orgA.id, ["SENIOR_ADVISER", "DEAN", "OSAS"]);
+  // Org B must be an organization President A does NOT preside or belong to —
+  // the cross-org fixtures depend on it (the seeded re-runs promoted presA to
+  // several orgs' PRESIDENT seat, which used to make "APDEV" a false negative).
+  const orgB = await prisma.organization.findFirst({
+    where: {
+      id: { not: orgA.id },
+      status: "ACTIVE",
+      members: {
+        none: {
+          userId: presA.id,
+          position: "PRESIDENT",
+          academicYear: AY,
+          isCurrent: true,
+        },
+      },
+    },
+  });
+  if (!orgB) throw new Error("no fixture org exists where President A is not the current PRESIDENT officer");
+
+  void (await createFreshRoute("SF003", orgA.id, ["PRESIDENT", "SECRETARY", "SENIOR_ADVISER", "DEAN"]));
+  void (await createFreshRoute("SF003", orgB.id, ["PRESIDENT", "SECRETARY", "SENIOR_ADVISER", "DEAN"]));
+  void (await createFreshRoute("SF006", orgA.id, ["SENIOR_ADVISER", "DEAN", "OSAS"]));
 
   console.log("-- Test 1: current President A, Organization A document -> ALLOW");
   const t1 = await canUserSign({ userId: presA.id, entityType: "SF", entityId: entityId(orgA.id) });
@@ -108,7 +125,7 @@ async function main() {
     await authorizeStepForUser({ userId: presA.id, entityType: "SF", entityId: entityId(orgB.id) });
     check("Direct API call rejected", false);
   } catch (e) {
-    const code = (e as any).code;
+    const code = (e as { code?: string }).code;
     check("Direct API call rejected", code === "NOT_YOUR_STEP", `denied(code=${code})`);
   }
 

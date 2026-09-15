@@ -3,6 +3,7 @@
 import { useActionState, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { useExitGuard } from "@/components/unsaved-guard";
 import {
   ArrowLeft,
   Download,
@@ -84,10 +85,13 @@ export function FormWorkspaceClient({
 }) {
   const router = useRouter();
   const [mode, setMode] = useState<"preview" | "edit">("preview");
+  const [dirty, setDirty] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [activeField, setActiveField] = useState<string | null>(null);
   const [submitState, submitAction] = useActionState(submitFormDocument, EMPTY);
   const sigRef = useRef<HTMLDivElement | null>(null);
+
+  useExitGuard(dirty);
 
   // After a successful submit, pull the refreshed server props (lifecycle,
   // draft state, version cache-buster) so the page reflects the new status.
@@ -297,6 +301,7 @@ export function FormWorkspaceClient({
                     initial={draft}
                     activeField={activeField}
                     onActiveField={setActiveField}
+                    onDirtyChange={setDirty}
                   />
                 </div>
               </aside>
