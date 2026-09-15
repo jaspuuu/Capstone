@@ -1,5 +1,6 @@
 import { Editable } from "@/components/forms/editable";
 import type { SignatureInfo } from "@/lib/signatures";
+import { getFormTemplate } from "@/lib/forms-registry";
 
 /**
  * Shared chrome for the official SF forms — typography lifted verbatim from
@@ -48,6 +49,20 @@ export function SfFooter({ code }: { code: string }) {
   );
 }
 
+/** Screen-only metadata strip (never prints): template code, version, status. */
+export function SfFormMeta({ code }: { code: string }) {
+  const t = getFormTemplate(code);
+  if (!t) return null;
+  return (
+    <div className="mx-auto mb-4 mt-2 max-w-[210mm] px-4 print:hidden">
+      <p className="text-xs text-content-muted">
+        <span className="font-semibold text-content-secondary">{t.formCode}</span> · {t.formName} ·{" "}
+        {t.templateVersion} · {t.status}
+      </p>
+    </div>
+  );
+}
+
 /** Right-aligned "____________ / Date" blank used by the letter forms. */
 export function SfDateBlank() {
   return (
@@ -74,7 +89,7 @@ export function SignatureMark({ sig, inline = false }: { sig: SignatureInfo; inl
         className={
           inline
             ? "mr-1 inline-block h-[8mm] w-auto max-w-[45mm] object-contain align-middle"
-            : "mx-auto mb-1 h-[11mm] w-auto max-w-full object-contain"
+            : "mx-auto mb-[2px] block h-[11mm] w-auto max-w-full object-contain"
         }
       />
     );
@@ -85,7 +100,7 @@ export function SignatureMark({ sig, inline = false }: { sig: SignatureInfo; inl
         className={
           inline
             ? "mr-1 inline text-[13pt] leading-none text-black"
-            : "mb-0.5 text-center text-[15pt] leading-none text-black"
+            : "mb-0 text-center text-[15pt] leading-none text-black"
         }
         style={{ fontFamily: '"Great Vibes", cursive' }}
       >
@@ -138,14 +153,14 @@ export function SfApprovers({
       <div className="mt-8 text-center">
         <p className="font-bold">Recommending Approval:</p>
         {coordinatorSig ? <SignatureMark sig={coordinatorSig} /> : null}
-        <p className="mt-8 font-bold underline">AL JOHN A. VILLAREAL</p>
+        <p className="mt-8 font-bold underline">NIÑO EMMANUELE ALDI L. ASTOVESA</p>
         <p>Coordinator, Student Organization Unit</p>
       </div>
 
       <div className="mt-8 text-center">
         <p className="font-bold">{approvedLabel}</p>
         {directorSig ? <SignatureMark sig={directorSig} /> : null}
-        <p className="mt-8 font-bold underline">ALBERTO B. CASTILLO, EdD</p>
+        <p className="mt-8 font-bold underline">JEANFEL CASIÑO</p>
         <p>Director/Chairperson, Office of Student Affairs and Services</p>
       </div>
     </>

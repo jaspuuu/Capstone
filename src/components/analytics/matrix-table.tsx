@@ -68,26 +68,31 @@ export function ComplianceMatrix({ rows }: { rows: MatrixRow[] }) {
 
   return (
     <div>
-      <div className="mb-3 flex items-center justify-between gap-2">
-        <select
-          aria-label="Sort organizations"
-          value={sortKey}
-          onChange={(e) => setSortKey(e.target.value as SortKey)}
-          className="h-9 rounded-lg border border-line-strong bg-surface px-2.5 text-xs font-medium text-content focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/15"
-        >
-          {SORTS.map((s) => (
-            <option key={s.key} value={s.key}>
-              {s.label}
-            </option>
-          ))}
-        </select>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-content-muted">
+            Order
+          </span>
+          <select
+            aria-label="Sort organizations"
+            value={sortKey}
+            onChange={(e) => setSortKey(e.target.value as SortKey)}
+            className="h-9 rounded-lg border border-line-strong bg-surface px-2.5 text-xs font-medium text-content focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/15"
+          >
+            {SORTS.map((s) => (
+              <option key={s.key} value={s.key}>
+                {s.label}
+              </option>
+            ))}
+          </select>
+        </div>
         <span className="text-xs text-content-muted">
           {rows.length} organization{rows.length === 1 ? "" : "s"} · click an organization for its analytics
         </span>
       </div>
 
       <TableWrap>
-        <THead>
+        <THead className="border-gold/40">
           <TH>Organization</TH>
           <TH>Recognition</TH>
           <TH>Requirements</TH>

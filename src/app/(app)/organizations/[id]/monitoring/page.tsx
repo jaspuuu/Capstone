@@ -14,6 +14,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { TableWrap, THead, TH, TR, TD } from "@/components/ui/table";
 import { MonitoringForm } from "../monitoring-form";
+import { OrgWorkspaceNav } from "@/components/org-workspace-nav";
 export const instant = false;
 
 export const metadata: Metadata = { title: "Activity monitoring" };
@@ -35,6 +36,8 @@ export default async function OrganizationMonitoringPage({
   searchParams: Promise<{ sem?: string }>;
 }) {
   const user = await requireUser();
+  // Internal monitoring — plain members see activities, not the tracking/report side.
+  if (user.role === "MEMBER") notFound();
   const { id } = await params;
   const sp = await searchParams;
   const sem: 1 | 2 = sp.sem === "2" ? 2 : 1;
@@ -129,6 +132,8 @@ export default async function OrganizationMonitoringPage({
           </Link>
         }
       />
+
+      <OrgWorkspaceNav orgId={org.id} active="activities" />
 
       <div className="mb-5 flex flex-wrap items-center gap-2">
         {[1, 2].map((s) => {

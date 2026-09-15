@@ -8,7 +8,7 @@ export function Card({
   return (
     <div
       className={cn(
-        "relative rounded-xl border border-line bg-surface shadow-card bg-[radial-gradient(560px_200px_at_50%_0%,rgba(18,59,99,0.045),transparent_65%)]",
+        "relative rounded-xl border border-line bg-surface shadow-card",
         className
       )}
       {...props}
@@ -43,9 +43,9 @@ export function CardHeader({
           </span>
         )}
         <div>
-          <h2 className="font-display text-base font-bold text-content">{title}</h2>
+          <h2 className="font-display text-base font-semibold tracking-tight text-content">{title}</h2>
           {description && (
-            <p className="mt-0.5 text-sm text-content-secondary">{description}</p>
+            <p className="mt-0.5 text-xs leading-relaxed text-content-secondary">{description}</p>
           )}
         </div>
       </div>

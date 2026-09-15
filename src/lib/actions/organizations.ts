@@ -8,12 +8,19 @@ import { db } from "@/lib/db";
 import { can } from "@/lib/auth/rbac";
 import { requirePermissionOrThrow, requireUser } from "@/lib/auth/guards";
 import { writeAudit } from "@/lib/audit";
-import { notifyOrgOfficers } from "@/lib/notifications";
+import { notifyOrgOfficers, notifyUsers } from "@/lib/notifications";
 import { currentAcademicYear, formatDateTime } from "@/lib/utils";
 import { saveAttachmentFile, deleteAttachmentFile } from "@/lib/attachments";
 import { ORG_APPLICATION_WORKFLOW } from "@/lib/workflow";
 import { orgAppRequirements, orgAppSubmissionGaps } from "@/lib/org-application";
-import type { OrgApplicationStatus, Role } from "@/generated/prisma/client";
+import {
+  EXCLUSIVE_OFFICER_POSITIONS,
+  isExclusiveOfficerPosition,
+  activeMembershipsElsewhere,
+  officerAssignmentElsewhere,
+  exclusivityMessage,
+} from "@/lib/membership-exclusivity";
+import type { MemberPosition, OrgApplicationStatus, Role } from "@/generated/prisma/client";
 
 export type ActionState = { error?: string; success?: string };
 
@@ -145,6 +152,24 @@ export async function createOrganization(
   for (const pid of officerIds) {
     if (!officers.some((o) => o.id === pid)) {
       return { error: "Selected officer account was not found, is inactive, or is not a student." };
+    }
+  }
+
+  // §24 exclusivity: a founding President/Secretary cannot already hold any
+  // effective seat in another organization for this academic year. The org id
+  // does not exist yet, so any effective seat elsewhere blocks the creation.
+  for (const pid of officerIds) {
+    const officer = officers.find((o) => o.id === pid);
+    if (!officer) continue;
+    const seat = await activeMembershipsElsewhere(pid, "__ORG_NOT_CREATED__", ay);
+    if (seat) {
+      return {
+        error: exclusivityMessage(
+          `${officer.firstName} ${officer.lastName}`,
+          seat,
+          pid === presidentId ? "PRESIDENT" : "SECRETARY"
+        ),
+      };
     }
   }
 
@@ -461,6 +486,7 @@ function orgAppAction(transition: OrgAppTransition) {
               hasSeniorAdviser: org.advisers.some((a) => a.type === "REGULAR" && a.isCurrent),
               hasPresident: officers.some((m) => m.position === "PRESIDENT"),
               hasSecretary: officers.some((m) => m.position === "SECRETARY"),
+              activeMemberCount: officers.filter((m) => m.status === "ACTIVE").length,
             })
           );
           if (gaps.length > 0) {
@@ -570,12 +596,22 @@ function orgAppAction(transition: OrgAppTransition) {
       const outcome = outcomeMap[transition];
       if (outcome) {
         try {
+          const ay = currentAcademicYear();
           await notifyOrgOfficers(id, {
             type: outcome.type,
+            category: transition === "RETURN" ? "REVISION" : ["CONFER"].includes(transition) ? "APPROVAL" : "SUBMISSION",
+            priority: ["CONFER", "RETURN"].includes(transition) ? (transition === "RETURN" ? "ACTION_REQUIRED" : "SUCCESS") : "INFO",
             title: `${outcome.title}: ${org.name}`,
             body: [note ? `Note: ${note.slice(0, 160)}` : null].filter(Boolean).join(" · ") || "Review your organization's application.",
             link: `/organizations/${id}`,
-          });
+            entityType: "Organization",
+            entityId: id,
+            academicYear: ay,
+            reason:
+              transition === "RETURN"
+                ? "Your application was returned; the review is blocked until you revise it."
+                : "You lead this organization and are notified of application milestones.",
+          }, { academicYear: ay });
         } catch {
           // Best-effort.
         }
@@ -671,10 +707,16 @@ export async function scheduleOrgInterview(
     try {
       await notifyOrgOfficers(id, {
         type: "INTERVIEW_SCHEDULED",
+        category: "INTERVIEW",
+        priority: "ACTION_REQUIRED",
         title: `Interview scheduled: ${org.name}`,
         body: `${formatDateTime(interviewAt)}${note ? ` · ${note.slice(0, 140)}` : ""}`,
         link: `/organizations/${id}`,
-      });
+        entityType: "Organization",
+        entityId: id,
+        academicYear: currentAcademicYear(),
+        reason: "Your organization's accreditation interview is upcoming; please attend on time.",
+      }, { academicYear: currentAcademicYear() });
     } catch {
       // Best-effort.
     }
@@ -907,6 +949,30 @@ async function requireOrgOfficerOrAdmin(organizationId: string) {
   return user;
 }
 
+/**
+ * §24 student-officer exclusivity. A student granted an officer seat cannot
+ * hold ANY effective seat in another org for the same AY; a regular seat is
+ * only blocked when the student already holds an officer seat elsewhere.
+ * Returns a user-facing error string on conflict, null when free to join.
+ */
+async function exclusivityErrorForSeat(
+  student: { id: string; firstName: string; lastName: string },
+  organizationId: string,
+  academicYear: string,
+  position: string
+): Promise<string | null> {
+  const studentName = `${student.firstName} ${student.lastName}`.trim();
+  const pos = position as MemberPosition;
+  if (isExclusiveOfficerPosition(pos)) {
+    const seat = await activeMembershipsElsewhere(student.id, organizationId, academicYear);
+    if (seat) return exclusivityMessage(studentName, seat, pos);
+    return null;
+  }
+  const seat = await officerAssignmentElsewhere(student.id, organizationId, academicYear);
+  if (seat) return exclusivityMessage(studentName, seat, pos);
+  return null;
+}
+
 /** Live student search for the SF-005-style member picker (Â§14). */
 export async function searchStudents(params: {
   organizationId: string;
@@ -924,10 +990,25 @@ export async function searchStudents(params: {
   });
   const exclude = existing.map((e) => e.userId);
 
+  // §24 exclusivity: a student who already holds an officer seat elsewhere for
+  // this AY cannot be picked from the directory at all.
+  const officersElsewhere = await db.organizationMember.findMany({
+    where: {
+      academicYear: params.academicYear,
+      organizationId: { not: params.organizationId },
+      isCurrent: true,
+      status: { in: ["ACTIVE", "APPROVED"] },
+      position: { in: [...EXCLUSIVE_OFFICER_POSITIONS] },
+    },
+    select: { userId: true },
+  });
+  const officerExclude = officersElsewhere.map((e) => e.userId);
+  const excludedIds = [...new Set([...exclude, ...officerExclude])];
+
   const rows = await db.user.findMany({
     where: {
       isActive: true,
-      id: { notIn: exclude },
+      id: { notIn: excludedIds },
       role: { in: ["MEMBER", "PRESIDENT", "SECRETARY"] },
       ...(q
         ? {
@@ -984,11 +1065,27 @@ export async function addMembersBulk(_prev: ActionState, formData: FormData): Pr
     });
     if (validUsers.length === 0) return { error: "No valid active students in selection." };
 
+    // §24 exclusivity: a student holding an officer seat elsewhere in the same
+    // AY cannot be registered here (bulk adds are always regular members).
+    const officersElsewhere = await db.organizationMember.findMany({
+      where: {
+        academicYear,
+        organizationId: { not: organizationId },
+        isCurrent: true,
+        status: { in: ["ACTIVE", "APPROVED"] },
+        position: { in: [...EXCLUSIVE_OFFICER_POSITIONS] },
+        userId: { in: validUsers.map((u) => u.id) },
+      },
+      select: { userId: true },
+    });
+    const conflictedIds = new Set(officersElsewhere.map((row) => row.userId));
+
     // One position per row defaults to MEMBER; officers are set individually.
     const created = await db.$transaction(
       async (tx) => {
         let count = 0;
         for (const u of validUsers) {
+          if (conflictedIds.has(u.id)) continue;
           const exists = await tx.organizationMember.findUnique({
             where: {
               organizationId_userId_academicYear: {
@@ -1027,11 +1124,15 @@ export async function addMembersBulk(_prev: ActionState, formData: FormData): Pr
     });
     revalidatePath(`/organizations/${organizationId}`);
     revalidatePath("/forms/sf-005");
+    const eligible = validUsers.filter((u) => !conflictedIds.has(u.id)).length;
+    const skippedConflicts = validUsers.length - eligible;
     return {
       success:
-        created === validUsers.length
-          ? `Added ${created} member${created === 1 ? "" : "s"}.`
-          : `Added ${created}; ${validUsers.length - created} already registered.`,
+        skippedConflicts > 0
+          ? `Added ${created} member${created === 1 ? "" : "s"}; ${skippedConflicts} skipped for holding an officer seat in another organization this academic year.`
+          : created === eligible
+            ? `Added ${created} member${created === 1 ? "" : "s"}.`
+            : `Added ${created}; ${eligible - created} already registered.`,
     };
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Failed to add members." };
@@ -1065,11 +1166,16 @@ export async function applyForMembership(
     if (existing) {
       return {
         error:
-          existing.status === "APPLIED"
+          ["APPLIED", "UNDER_REVIEW"].includes(existing.status)
             ? "Your application is already awaiting review."
             : "You are already registered for this academic year.",
       };
     }
+
+    // §24 exclusivity: a student officer cannot also hold a seat in another
+    // org for the same academic year.
+    const seat = await officerAssignmentElsewhere(user.id, organizationId, ay);
+    if (seat) return { error: exclusivityMessage(user.firstName + " " + user.lastName, seat, "MEMBER") };
 
     await db.organizationMember.create({
       data: {
@@ -1079,6 +1185,19 @@ export async function applyForMembership(
         status: "APPLIED",
         academicYear: ay,
       },
+    });
+    await notifyUsers([user.id], {
+      type: "MEMBERSHIP_APPLIED",
+      category: "MEMBERSHIP",
+      priority: "INFO",
+      title: `Application submitted to ${org.name}`,
+      body: "Your membership application is now awaiting officer review.",
+      link: `/organizations/${organizationId}`,
+      organizationId,
+      entityType: "Organization",
+      entityId: organizationId,
+      academicYear: ay,
+      reason: `You applied to join ${org.name} for AY ${ay}.`,
     });
     await writeAudit({
       userId: user.id,
@@ -1096,10 +1215,22 @@ export async function applyForMembership(
 }
 
 /** Â§24: replace an officer for the year â€” one President / one Secretary each. */
+/** §24: replace an officer for the year — one President / one Secretary each. */
 export async function setMemberPosition(formData: FormData): Promise<void> {
   const membershipId = String(formData.get("membershipId") ?? "");
   const position = String(formData.get("position") ?? "");
-  if (!["MEMBER", "PRESIDENT", "SECRETARY"].includes(position)) return;
+  const allowedPositions = [
+    "PRESIDENT",
+    "VICE_PRESIDENT",
+    "SECRETARY",
+    "TREASURER",
+    "AUDITOR",
+    "PUBLIC_INFORMATION_OFFICER",
+    "BUSINESS_MANAGER",
+    "MEMBER",
+    "OTHER",
+  ];
+  if (!allowedPositions.includes(position)) return;
   const nextPosition = position as "MEMBER" | "PRESIDENT" | "SECRETARY";
 
   const membership = await db.organizationMember.findUnique({
@@ -1111,6 +1242,21 @@ export async function setMemberPosition(formData: FormData): Promise<void> {
   if (membership.position === position) return;
 
   const ay = membership.academicYear;
+
+  // §24 exclusivity: promoting to an officer seat (incl. OTHER) is blocked
+  // when the student already holds any effective seat in another org for the
+  // same AY. Same-org position changes remain allowed.
+  if (isExclusiveOfficerPosition(nextPosition as MemberPosition)) {
+    const seat = await activeMembershipsElsewhere(
+      membership.userId,
+      membership.organizationId,
+      ay
+    );
+    if (seat) {
+      return;
+    }
+  }
+
   await db.$transaction(async (tx) => {
     // If another member holds the target position, demote them to MEMBER â€”
     // the swap is recorded in the audit log, the roster history stays intact.
@@ -1164,10 +1310,25 @@ export async function decideMembership(formData: FormData): Promise<void> {
     where: { id: membershipId },
     include: { organization: true, user: true },
   });
-  if (!membership || membership.status !== "APPLIED") return;
+  // Officers decide pending applications at either stage: a fresh APPLIED row
+  // or one already moved to UNDER_REVIEW by Review.
+  if (!membership || !["APPLIED", "UNDER_REVIEW"].includes(membership.status)) return;
   const user = await requireOrgOfficerOrAdmin(membership.organizationId);
 
   const nextStatus = decision === "APPROVED" ? "ACTIVE" : "REJECTED";
+
+  // §24 exclusivity at approval time: if the applicant became a student
+  // officer elsewhere while their application was pending, do not activate
+  // the seat — the application stays pending for officers to resolve.
+  if (decision === "APPROVED") {
+    const oseat = await officerAssignmentElsewhere(
+      membership.userId,
+      membership.organizationId,
+      membership.academicYear
+    );
+    if (oseat) return;
+  }
+
   await db.organizationMember.update({
     where: { id: membershipId },
     data: {
@@ -1176,13 +1337,31 @@ export async function decideMembership(formData: FormData): Promise<void> {
       decidedById: user.id,
     },
   });
+  await notifyUsers([membership.user.id], {
+    type: decision === "APPROVED" ? "MEMBERSHIP_APPROVED" : "MEMBERSHIP_REJECTED",
+    category: "MEMBERSHIP",
+    priority: decision === "APPROVED" ? "SUCCESS" : "INFO",
+    title:
+      decision === "APPROVED"
+        ? `You are now a member of ${membership.organization.name}`
+        : `Membership application not approved: ${membership.organization.name}`,
+    link: `/organizations/${membership.organizationId}`,
+    organizationId: membership.organizationId,
+    entityType: "Organization",
+    entityId: membership.organizationId,
+    academicYear: membership.academicYear,
+    reason:
+      decision === "APPROVED"
+        ? `Your application to ${membership.organization.name} for AY ${membership.academicYear} was approved.`
+        : `Your application to ${membership.organization.name} for AY ${membership.academicYear} was not approved.`,
+  });
   await writeAudit({
     userId: user.id,
     action: "MEMBERSHIP_REVIEWED",
     entityType: "Organization",
     entityId: membership.organizationId,
     entityLabel: membership.organization.name,
-    previousState: { status: "APPLIED", member: `${membership.user.firstName} ${membership.user.lastName}` },
+    previousState: { status: membership.status, member: `${membership.user.firstName} ${membership.user.lastName}` },
     newState: { status: nextStatus, member: `${membership.user.firstName} ${membership.user.lastName}`, academicYear: membership.academicYear },
   });
   revalidatePath(`/organizations/${membership.organizationId}`);
@@ -1248,7 +1427,18 @@ export async function addMember(_prev: ActionState, formData: FormData): Promise
   const academicYear = String(formData.get("academicYear") ?? currentAcademicYear());
 
   if (!organizationId || !memberId) return { error: "Select a student to add." };
-  if (!["PRESIDENT", "SECRETARY", "MEMBER"].includes(position)) {
+  const allowedPositions = [
+    "PRESIDENT",
+    "VICE_PRESIDENT",
+    "SECRETARY",
+    "TREASURER",
+    "AUDITOR",
+    "PUBLIC_INFORMATION_OFFICER",
+    "BUSINESS_MANAGER",
+    "MEMBER",
+    "OTHER",
+  ];
+  if (!allowedPositions.includes(position)) {
     return { error: "Invalid position." };
   }
 
@@ -1259,7 +1449,7 @@ export async function addMember(_prev: ActionState, formData: FormData): Promise
   if (!memberUser || !memberUser.isActive) return { error: "Student account not found or inactive." };
 
   // Keep at most one President / one Secretary per org per year.
-  if (position !== "MEMBER") {
+  if (position === "PRESIDENT" || position === "SECRETARY") {
     const incumbent = await db.organizationMember.findFirst({
       where: { organizationId, position: position as "PRESIDENT" | "SECRETARY", academicYear, isCurrent: true },
     });
@@ -1269,6 +1459,10 @@ export async function addMember(_prev: ActionState, formData: FormData): Promise
       };
     }
   }
+
+  // §24 exclusivity: one officer position per org per AY.
+  const conflict = await exclusivityErrorForSeat(memberUser, organizationId, academicYear, position);
+  if (conflict) return { error: conflict };
 
   try {
     await db.organizationMember.create({

@@ -1,49 +1,79 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Bell, BellOff, CheckCheck } from "lucide-react";
+import { BellOff, CheckCheck, Settings2 } from "lucide-react";
 import { requireUser } from "@/lib/auth/guards";
-import { db } from "@/lib/db";
-import { formatDateTime } from "@/lib/utils";
-import { markAllNotificationsRead, markNotificationRead } from "@/lib/actions/notifications";
+import { getNotificationFeed, getNotificationStats } from "@/lib/notification-center";
+import { markAllNotificationsRead } from "@/lib/actions/notifications";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { QuickActionForm } from "@/components/action-form";
+import { NotificationRow } from "@/components/notifications/notification-row";
+import { PRIORITY_META } from "@/components/notifications/priority";
+import { cn } from "@/lib/utils";
 export const instant = false;
 
 export const metadata: Metadata = { title: "Notifications" };
 
-const TYPE_STYLES: Record<string, string> = {
-  DEADLINE_NEW: "bg-warning-light text-warning",
-  DEADLINE_UPDATED: "bg-warning-light text-warning",
-  APPLICATION_RETURNED: "bg-danger-light text-danger",
-  APPLICATION_REJECTED: "bg-danger-light text-danger",
-  APPLICATION_APPROVED: "bg-success-light text-success",
-  RECOGNITION_CONFERRED: "bg-success-light text-success",
-  ACTIVITY_RETURNED: "bg-danger-light text-danger",
-  ACTIVITY_REJECTED: "bg-danger-light text-danger",
-  ACTIVITY_APPROVED: "bg-success-light text-success",
-  REPORT_RETURNED: "bg-danger-light text-danger",
-  REPORT_ACCEPTED: "bg-success-light text-success",
-};
+type View = "all" | "action" | "activities" | "announcements";
 
-export default async function NotificationsPage() {
+export default async function NotificationsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ view?: string }>;
+}) {
+  const { view: rawView } = await searchParams;
+  const view: View =
+    rawView === "action" || rawView === "activities" || rawView === "announcements"
+      ? rawView
+      : "all";
   const user = await requireUser();
-  const notifications = await db.notification.findMany({
-    where: { userId: user.id },
-    orderBy: { createdAt: "desc" },
-    take: 100,
-  });
-  const unread = notifications.filter((n) => n.readAt == null).length;
+  const [feed, actionFeed, stats] = await Promise.all([
+    getNotificationFeed(user.id),
+    view === "action" ? getNotificationFeed(user.id, { scoped: true }) : null,
+    getNotificationStats(user.id),
+  ]);
+
+  // Tab scopes are mutually exclusive — ACTION_REQUIRED first, then
+  // activity-type categories (ACTIVITY/MEMBERSHIP/APPROVAL/REVISION/SIGNATURE),
+  // then everything else as announcements.
+  const ACTIVITY_CATEGORIES = ["ACTIVITY", "MEMBERSHIP", "APPROVAL", "REVISION", "SIGNATURE"] as const;
+  const actionItems = actionFeed ?? feed.filter((n) => n.priority === "ACTION_REQUIRED");
+  const activityItems = feed.filter((n) => !actionItems.includes(n) && ACTIVITY_CATEGORIES.includes(n.category as never));
+  const announcementItems = feed.filter((n) => !actionItems.includes(n) && !activityItems.includes(n));
+
+  const visible =
+    view === "action"
+      ? actionItems
+      : view === "activities"
+        ? activityItems
+        : view === "announcements"
+          ? announcementItems
+          : feed;
+
+  const tabs: { key: View; label: string; count: number }[] = [
+    { key: "all", label: "All", count: stats.total },
+    { key: "action", label: "Action required", count: actionItems.length },
+    { key: "activities", label: "Activities", count: activityItems.length },
+    { key: "announcements", label: "Announcements", count: announcementItems.length },
+  ];
 
   return (
     <>
       <PageHeader
         title="Notifications"
-        description={unread > 0 ? `${unread} unread notification${unread > 1 ? "s" : ""}.` : "You're all caught up."}
+        description={
+          stats.unread > 0
+            ? `${stats.unread} unread — ${
+                stats.actionRequired > 0
+                  ? `${stats.actionRequired} need${stats.actionRequired === 1 ? "s" : ""} your action.`
+                  : "everything else is updates."
+              }`
+            : "You're all caught up."
+        }
         breadcrumb={[{ label: "Home", href: "/dashboard" }, { label: "Notifications" }]}
         actions={
-          unread > 0 ? (
+          stats.unread > 0 ? (
             <QuickActionForm action={markAllNotificationsRead} hidden={{}} label="" variant="outline">
               <span className="inline-flex items-center gap-1.5 text-sm font-semibold">
                 <CheckCheck className="size-4" aria-hidden /> Mark all read
@@ -53,74 +83,80 @@ export default async function NotificationsPage() {
         }
       />
 
+      {/* Priority legend */}
+      <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-xl border border-line bg-surface px-4 py-2.5 text-xs text-content-secondary">
+        <span className="font-bold uppercase tracking-widest text-content-muted">Priority</span>
+        {(["ACTION_REQUIRED", "ATTENTION", "INFO", "SUCCESS"] as const).map((p) => (
+          <span key={p} className="inline-flex items-center gap-1.5">
+            <span className={cn("size-2 rounded-full", PRIORITY_META[p].dot)} aria-hidden />
+            {PRIORITY_META[p].label}
+          </span>
+        ))}
+        <Link
+          href="/notifications/preferences"
+          className="ml-auto inline-flex items-center gap-1.5 font-semibold text-primary hover:underline"
+        >
+          <Settings2 className="size-3.5" aria-hidden /> Preferences
+        </Link>
+      </div>
+
+      {/* Filter tabs */}
+      <div className="mb-4 flex items-center gap-1 rounded-xl border border-line bg-surface p-1" role="tablist" aria-label="Filter notifications">
+        {tabs.map((t) => {
+          const active = view === t.key;
+          return (
+            <Link
+              key={t.key}
+              href={`/notifications${t.key === "all" ? "" : `?view=${t.key}`}`}
+              role="tab"
+              aria-selected={active}
+              className={cn(
+                "flex-1 rounded-lg px-3 py-2 text-center text-sm font-semibold transition-colors",
+                active ? "bg-primary text-white shadow-sm" : "text-content-secondary hover:bg-surface-secondary hover:text-content"
+              )}
+            >
+              {t.label}
+              <span
+                className={cn(
+                  "ml-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-bold",
+                  active ? "bg-white/20 text-white" : "bg-surface-secondary text-content-muted"
+                )}
+              >
+                {t.count}
+              </span>
+            </Link>
+          );
+        })}
+      </div>
+
       <Card>
         <CardContent className="pt-2">
-          {notifications.length === 0 ? (
+          {visible.length === 0 ? (
             <EmptyState
               icon={BellOff}
-              title="No notifications yet"
-              description="Deadline announcements and review decisions on your organization's submissions will appear here."
+              title={view === "action" ? "No action required" : "No notifications yet"}
+              description={
+                view === "action"
+                  ? "When something needs your signature, review or decision it will appear here in red."
+                  : "Deadline reminders and review decisions on your submissions will appear here."
+              }
             />
           ) : (
             <ul className="divide-y divide-line">
-              {notifications.map((n) => {
-                const tone = TYPE_STYLES[n.type] ?? "bg-surface-secondary text-content-secondary";
-                const row = (
-                  <div className="flex items-start gap-3 px-4 py-3.5 sm:px-5">
-                    <span className={`mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg ${tone}`}>
-                      <Bell className="size-4" aria-hidden />
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <p className={`text-sm ${n.readAt == null ? "font-bold text-content" : "font-medium text-content-secondary"}`}>
-                        {n.title}
-                        {n.readAt == null && (
-                          <span className="ml-2 inline-block size-2 rounded-full bg-primary align-middle" aria-label="Unread" />
-                        )}
-                      </p>
-                      {n.body && <p className="mt-0.5 text-xs leading-relaxed text-content-secondary">{n.body}</p>}
-                      <p className="mt-1 text-[11px] text-content-muted">{formatDateTime(n.createdAt)}</p>
-                    </div>
-                    {n.link && (
-                      <span className="hidden shrink-0 items-center self-center text-xs font-semibold text-primary sm:inline">
-                        Open →
-                      </span>
-                    )}
-                  </div>
-                );
-                return (
-                  <li key={n.id} className={n.readAt == null ? "bg-primary-light/30" : ""}>
-                    {n.link ? (
-                      <div className="flex items-center">
-                        <Link href={n.link} className="min-w-0 flex-1 hover:bg-surface-secondary">
-                          {row}
-                        </Link>
-                        {n.readAt == null && (
-                          <QuickActionForm
-                            action={markNotificationRead}
-                            hidden={{ id: n.id }}
-                            label=""
-                            variant="ghost"
-                            className="mr-3"
-                          >
-                            <span className="text-xs font-semibold text-content-secondary">Mark read</span>
-                          </QuickActionForm>
-                        )}
-                      </div>
-                    ) : (
-                      row
-                    )}
-                  </li>
-                );
-              })}
+              {visible.map((n) => (
+                <NotificationRow key={n.id} n={n} />
+              ))}
             </ul>
           )}
         </CardContent>
       </Card>
 
-      <p className="mt-4 text-xs text-content-muted">
-        Need something specific? Deadlines are also listed on the{" "}
-        <Link href="/deadlines" className="font-semibold text-primary hover:underline">Deadlines page</Link>.
-      </p>
+      {feed.length === 0 && (
+        <p className="mt-4 text-xs text-content-muted">
+          Deadlines are also listed on the{" "}
+          <Link href="/deadlines" className="font-semibold text-primary hover:underline">Deadlines page</Link>.
+        </p>
+      )}
     </>
   );
 }

@@ -3,15 +3,18 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bell, LogOut, Menu, Search, ShieldCheck, UserRound, X, Activity, Award, CalendarClock, CalendarDays, CalendarPlus, ChartColumn, ClipboardCheck, Files, LayoutDashboard, Landmark, ScrollText, School, Users, Wallet } from "lucide-react";
+import { LogOut, Menu, Search, ShieldCheck, UserRound, X, Activity, Award, CalendarCheck, CalendarClock, CalendarDays, CalendarPlus, ChartColumn, ClipboardCheck, FileSignature, Files, LayoutDashboard, Landmark, ScrollText, School, Users, Wallet } from "lucide-react";
 import type { NavIcon, NavSection } from "@/lib/nav";
 import { logout } from "@/lib/actions/auth";
 import { availableAcademicYears } from "@/lib/ay";
 import { YearPicker } from "@/components/year-picker";
+import { OrgSwitcher, type OrgSwitcherOption } from "@/components/org-switcher";
 import { cn, initials } from "@/lib/utils";
 import { SHORT_ROLE_LABELS } from "@/lib/constants";
 import type { Role } from "@/generated/prisma/client";
 import { Seal } from "@/components/ui/seal";
+import { NotificationCenterBell } from "@/components/notifications/notification-center-popover";
+import type { CenterRow } from "@/lib/notification-center";
 
 const NAV_ICONS: Record<NavIcon, React.ComponentType<{ className?: string }>> = {
   dashboard: LayoutDashboard,
@@ -28,6 +31,8 @@ const NAV_ICONS: Record<NavIcon, React.ComponentType<{ className?: string }>> = 
   users: Users,
   colleges: School,
   audit: ScrollText,
+  signatures: FileSignature,
+  attendance: CalendarCheck,
 };
 
 type ShellUser = {
@@ -67,13 +72,19 @@ export function Shell({
   user,
   nav,
   unreadNotifications = 0,
+  notificationCenter,
   selectedAy,
+  memberships = [],
+  selectedOrgId = null,
   children,
 }: {
   user: ShellUser;
   nav: NavSection[];
   unreadNotifications?: number;
+  notificationCenter?: { actionRequired: CenterRow[]; updates: CenterRow[] };
   selectedAy?: string;
+  memberships?: OrgSwitcherOption[];
+  selectedOrgId?: string | null;
   children: React.ReactNode;
 }) {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -257,23 +268,12 @@ export function Shell({
               </span>
             )}
             {selectedAy && <YearPicker selectedAy={selectedAy} years={availableAcademicYears()} />}
-            <Link
-              href="/notifications"
-              onClick={closeOverlays}
-              className="relative rounded-lg p-2 text-content-secondary transition-colors hover:bg-surface-secondary hover:text-content"
-              aria-label={
-                unreadNotifications > 0
-                  ? `Notifications, ${unreadNotifications} unread`
-                  : "Notifications"
-              }
-            >
-              <Bell className="size-5" aria-hidden />
-              {unreadNotifications > 0 && (
-                <span className="absolute -top-1 -right-1 flex min-w-5 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-bold leading-4 text-white">
-                  {unreadNotifications > 9 ? "9+" : unreadNotifications}
-                </span>
-              )}
-            </Link>
+            <OrgSwitcher memberships={memberships} selectedOrgId={selectedOrgId} />
+            <NotificationCenterBell
+              unread={unreadNotifications}
+              actionRequired={notificationCenter?.actionRequired ?? []}
+              updates={notificationCenter?.updates ?? []}
+            />
             <button
               type="button"
               onClick={() => setMenuOpen((o) => !o)}

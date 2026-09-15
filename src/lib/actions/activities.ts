@@ -8,7 +8,7 @@ import { db } from "@/lib/db";
 import { requirePermissionOrThrow, requireUser } from "@/lib/auth/guards";
 import { can, isAdminRole } from "@/lib/auth/rbac";
 import { writeAudit } from "@/lib/audit";
-import { notifyOrgOfficers } from "@/lib/notifications";
+import { notifyActiveMembers, notifyOrgOfficers } from "@/lib/notifications";
 import { currentAcademicYear } from "@/lib/utils";
 import { ACTIVITY_WORKFLOW } from "@/lib/workflow";
 
@@ -337,10 +337,39 @@ function transitionAction(transition: keyof typeof TRANSITIONS) {
       try {
         await notifyOrgOfficers(proposal.organizationId, {
           type: outcome.type,
+          category: transition === "RETURN" ? "REVISION" : "APPROVAL",
+          priority: transition === "RETURN" ? "ACTION_REQUIRED" : transition === "APPROVE" ? "SUCCESS" : "INFO",
           title: `${outcome.title}: ${proposal.title}`,
           body: note ? `Note: ${note.slice(0, 160)}` : undefined,
           link: `/activities/${id}`,
-        });
+          entityType: "ActivityProposal",
+          entityId: id,
+          reason:
+            transition === "RETURN"
+              ? "Your proposal was returned; the review is blocked until you revise it."
+              : "You lead this organization and are notified of activity review decisions.",
+        }, { academicYear: proposal.academicYear });
+      } catch {
+        // Best-effort.
+      }
+    }
+
+    // Fix #2: members get their own activity notifications — a newly approved
+    // activity is the member-facing event; review outcomes stay with officers.
+    if (transition === "APPROVE") {
+      try {
+        const start = proposal.startAt.toLocaleDateString("en-PH", { month: "long", day: "numeric", year: "numeric" });
+        await notifyActiveMembers(proposal.organizationId, {
+          type: "ACTIVITY_APPROVED_MEMBER",
+          category: "ACTIVITY",
+          priority: "SUCCESS",
+          title: `New approved activity: ${proposal.title}`,
+          body: proposal.venue ? `${proposal.venue} · ${start}` : start,
+          link: `/activities/${id}`,
+          entityType: "ActivityProposal",
+          entityId: id,
+          reason: `You are a member of ${proposal.organization.name} and this activity is now approved.`,
+        }, { academicYear: proposal.academicYear });
       } catch {
         // Best-effort.
       }

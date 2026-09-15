@@ -12,6 +12,11 @@ const ICON_TONES: Record<string, string> = {
   danger: "bg-danger-light text-danger",
 };
 
+const parseProgressFromHint = (hint: string | undefined): number | undefined => {
+  const match = hint?.match(/(\d+(?:\.\d+)?)\s*%/);
+  return match ? parseFloat(match[1]) : undefined;
+};
+
 export function StatCard({
   label,
   value,
@@ -31,6 +36,9 @@ export function StatCard({
   href?: string;
   className?: string;
 }) {
+  const progress = parseProgressFromHint(hint);
+  const progressClass = progress !== undefined ? `progress-${Math.round(progress)}` : "";
+
   const body = (
     <>
       <div className="flex items-start justify-between gap-3">
@@ -49,7 +57,16 @@ export function StatCard({
         )}
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-2">
-        <p className="font-display text-3xl font-bold tracking-tight tabular-nums text-content">{value}</p>
+        <p className="font-display text-3xl font-bold tracking-tabular-nums text-content">{value}</p>
+        {progress !== undefined ? (
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-content-secondary">{progress}%</span>
+            <div
+              className={`h-1 rounded-full ${progressClass}`}
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+        ) : null}
         {badge}
       </div>
       {hint && <p className="mt-1 text-xs text-content-muted">{hint}</p>}

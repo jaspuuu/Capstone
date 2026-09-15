@@ -12,10 +12,15 @@ const ROLES = [
   { value: "DEAN", label: "College Dean" },
   { value: "ADVISER_REGULAR", label: "Senior Adviser (Regular Faculty)" },
   { value: "ADVISER_PARTTIME", label: "Junior Adviser (Part-Time Faculty)" },
-  { value: "PRESIDENT", label: "Organization President" },
-  { value: "SECRETARY", label: "Organization Secretary" },
   { value: "MEMBER", label: "Organization Member" },
 ];
+
+// Officer positions derive from organization memberships (§account model), so
+// they cannot be provisioned here. Legacy accounts keep their role read-only.
+const LEGACY_LABELS: Record<string, string> = {
+  PRESIDENT: "Organization President (legacy — assigned via membership)",
+  SECRETARY: "Organization Secretary (legacy — assigned via membership)",
+};
 
 export function UserForm({
   action,
@@ -47,7 +52,11 @@ export function UserForm({
   const [collegeId, setCollegeId] = useState(initial?.collegeId ?? "");
 
   const deptOptions = departments.filter((d) => !collegeId || d.collegeId === collegeId);
-  const needsCollege = ["DEAN", "ADVISER_REGULAR", "ADVISER_PARTTIME", "PRESIDENT", "SECRETARY", "MEMBER"].includes(role);
+  const needsCollege = ["DEAN", "ADVISER_REGULAR", "ADVISER_PARTTIME", "MEMBER"].includes(role);
+  const isLegacyOfficer = initial?.role === "PRESIDENT" || initial?.role === "SECRETARY";
+  const roleOptions = ROLES.concat(
+    isLegacyOfficer ? [{ value: initial!.role, label: LEGACY_LABELS[initial!.role] }] : []
+  );
 
   return (
     <form action={formAction} className="space-y-5">
@@ -68,9 +77,18 @@ export function UserForm({
         <Field label="Middle name" htmlFor="middleName">
           <Input id="middleName" name="middleName" maxLength={80} defaultValue={initial?.middleName ?? ""} />
         </Field>
-        <Field label="System role" htmlFor="role" required>
+        <Field
+          label="System role"
+          htmlFor="role"
+          required
+          hint={
+            isLegacyOfficer
+              ? "Officer positions now derive from organization memberships. This account keeps its legacy role."
+              : "Officer positions are assigned through organization memberships, not provisioned here."
+          }
+        >
           <Select id="role" name="role" required value={role} onChange={(e) => setRole(e.target.value)}>
-            {ROLES.map((r) => (
+            {roleOptions.map((r) => (
               <option key={r.value} value={r.value}>
                 {r.label}
               </option>
@@ -115,7 +133,7 @@ export function UserForm({
           </Field>
         )}
 
-        {(role === "PRESIDENT" || role === "SECRETARY" || role === "MEMBER") && (
+        {role === "MEMBER" && (
           <Field label="Student number" htmlFor="studentNumber" hint="Optional">
             <Input id="studentNumber" name="studentNumber" maxLength={20} defaultValue={initial?.studentNumber ?? ""} />
           </Field>

@@ -29,8 +29,31 @@ export async function login(_prev: LoginState, formData: FormData): Promise<Logi
       action: "LOGIN_FAILED",
       entityType: "User",
       entityLabel: email,
-      newState: { reason: user ? "account_inactive" : "unknown_email" },
+      newState: {
+        reason: user
+          ? user.accountStatus === "SUSPENDED" ||
+            user.accountStatus === "DEACTIVATED" ||
+            user.accountStatus === "ARCHIVED" ||
+            user.accountStatus === "PENDING"
+            ? `account_${user.accountStatus.toLowerCase()}`
+            : "account_inactive"
+          : "unknown_email",
+      },
     });
+    // Existing accounts surface their lifecycle state so the person knows who
+    // to contact; unknown emails stay generic to avoid account enumeration.
+    if (user) {
+      if (user.accountStatus === "SUSPENDED") {
+        return { error: "This account is suspended. Contact OSAS for assistance." };
+      }
+      if (user.accountStatus === "PENDING") {
+        return { error: "This account is awaiting verification. Contact OSAS if this is unexpected." };
+      }
+      if (user.accountStatus === "ARCHIVED") {
+        return { error: "This account has been archived." };
+      }
+      return { error: "This account has been deactivated." };
+    }
     return invalid;
   }
 

@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { NoData } from "@/components/analytics/analytics-parts";
 import { formatDate } from "@/lib/utils";
 import { requirementLabel, type RequirementItem } from "@/lib/analytics";
+import { REQUIREMENT_STATUS_META } from "@/lib/constants";
 
 export type DrillRequirementsProps = {
   checklist: RequirementItem[];
@@ -19,13 +20,13 @@ export function DrillRequirements(p: DrillRequirementsProps) {
           {p.checklist.map((item) => (
             <div key={item.key} className="flex items-center justify-between gap-2 text-sm">
               <span className="text-content">{requirementLabel(item.key)}</span>
-              <Badge tone={item.met ? "success" : item.status === "RETURNED" ? "danger" : "neutral"}>
-                {item.met ? "Submitted / Approved" : item.status === "REQUIRED" ? "Missing" : item.status}
+              <Badge tone={item.met ? "success" : item.status === "RETURNED" ? "danger" : REQUIREMENT_STATUS_META[item.status]?.tone ?? "neutral"}>
+                {item.met ? "Approved" : REQUIREMENT_STATUS_META[item.status]?.label ?? item.status}
               </Badge>
             </div>
           ))}
           <p className="pt-1 text-xs text-content-secondary">
-            “Compliant” here means the tracked document actually exists — not merely that an application was filed.
+            A requirement counts as compliant only after final approval — uploaded or pending items are tracked, not complete.
           </p>
         </CardContent>
       </Card>
@@ -34,9 +35,9 @@ export function DrillRequirements(p: DrillRequirementsProps) {
         <CardHeader title="Applicable deadlines" description={`Deadlines applying to this organization for AY ${p.ay}.`} />
         <CardContent>
           {p.deadlines.length > 0 ? (
-            <ul className="space-y-2">
+            <ul className="divide-y divide-line">
               {p.deadlines.map((d) => (
-                <li key={d.id} className="flex items-center justify-between gap-2 rounded-lg border border-line px-3 py-2 text-sm">
+                <li key={d.id} className="flex items-center justify-between gap-2 py-2.5 text-sm first:pt-0 last:pb-0">
                   <span className="min-w-0 truncate text-content">{d.name}</span>
                   <span className="shrink-0 text-xs text-content-secondary">{formatDate(d.dueDate)}</span>
                 </li>

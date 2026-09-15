@@ -16,6 +16,7 @@ import {
   ATTACHMENT_KINDS,
   type AttachmentKind,
 } from "@/lib/attachments";
+import { ensureFollowUpForRecognition } from "@/lib/actions/follow-up";
 
 export type ActionState = { error?: string; success?: string };
 
@@ -81,7 +82,7 @@ async function recordEvent(
  * accomplishment reports — satisfied by first-class filed reports) before the
  * application may be submitted. Returns the labels of the missing items.
  */
-const FILED_REPORT_STATUSES = ["SUBMITTED", "ACCEPTED"] as const;
+const FILED_REPORT_STATUSES = ["SUBMITTED", "ACCEPTED", "RETURNED"] as const;
 
 async function missingChecklistRequirements(
   recognitionId: string,
@@ -194,8 +195,9 @@ export async function createRecognition(
     newState: { kind, academicYear, status: "DRAFT" },
   });
 
+  revalidatePath(`/organizations/${organizationId}/accreditation`);
   revalidatePath("/recognition");
-  redirect(`/recognition/${rec.id}`);
+  redirect(`/organizations/${organizationId}/accreditation`);
 }
 
 // ---------------------------------------------------------------------------
@@ -263,7 +265,7 @@ function transitionAction(transition: Transition) {
       }
       if (gaps.length > 0) {
         return {
-          error: `Complete the SF-001 checklist before submitting: ${gaps.join(", ")}. You can upload them from the organization's Documents page.`,
+          error: `Complete the SF-001 checklist before submitting: ${gaps.join(", ")}. Upload them from the accreditation page.`,
         };
       }
     } else if (transition === "CONFER") {
@@ -352,11 +354,38 @@ function transitionAction(transition: Transition) {
       APPROVE: { type: "APPLICATION_APPROVED", title: "Application approved" },
       CONFER: { type: "RECOGNITION_CONFERRED", title: "Official recognition conferred" },
     };
+
+    // §24: a submitted application automatically gets its one-week follow-up
+    // window tracked (expected follow-up = submission date + 7 days).
+    if (transition === "SUBMIT") {
+      await ensureFollowUpForRecognition(id, now);
+    }
+
     const outcome = outcomeMap[transition];
     if (outcome) {
       try {
+        const kind = {
+          entityType: "Recognition",
+          entityId: rec.id,
+          link: `/organizations/${rec.organizationId}/accreditation`,
+        } as const;
         await notifyOrgOfficers(rec.organizationId, {
+          ...kind,
           type: outcome.type,
+          category:
+            transition === "RETURN"
+              ? "REVISION"
+              : transition === "REJECT"
+                ? "APPROVAL"
+                : ["APPROVE", "CONFER"].includes(transition)
+                  ? "APPROVAL"
+                  : "SUBMISSION",
+          priority:
+            transition === "RETURN"
+              ? "ACTION_REQUIRED"
+              : ["APPROVE", "CONFER", "SUBMIT"].includes(transition)
+                ? "SUCCESS"
+                : "INFO",
           title: `${outcome.title}: ${rec.organization.name}`,
           body: [
             `AY ${rec.academicYear}`,
@@ -364,14 +393,18 @@ function transitionAction(transition: Transition) {
           ]
             .filter(Boolean)
             .join(" · "),
-          link: `/recognition/${id}`,
-        });
+          academicYear: rec.academicYear,
+          reason:
+            transition === "RETURN"
+              ? "Your application was returned; the review is blocked until you revise it."
+              : "You lead this organization and are notified of application milestones.",
+        }, { academicYear: rec.academicYear });
       } catch {
         // Best-effort.
       }
     }
 
-    revalidatePath(`/recognition/${id}`);
+    revalidatePath(`/organizations/${rec.organizationId}/accreditation`);
     revalidatePath("/recognition");
     revalidatePath("/dashboard");
     return { success: "Action recorded." };
@@ -458,14 +491,20 @@ export async function scheduleInterview(
     try {
       await notifyOrgOfficers(rec.organizationId, {
         type: "INTERVIEW_SCHEDULED",
+        category: "INTERVIEW",
+        priority: "ACTION_REQUIRED",
         title: `Interview scheduled: ${rec.organization.name}`,
         body: `AY ${rec.academicYear} · ${formatDateTime(interviewAt)}${note ? ` · ${note.slice(0, 140)}` : ""}`,
-        link: `/recognition/${id}`,
-      });
+        link: `/organizations/${rec.organizationId}/accreditation`,
+        entityType: "Recognition",
+        entityId: rec.id,
+        academicYear: rec.academicYear,
+        reason: "Your organization's accreditation interview is upcoming; please attend on time.",
+      }, { academicYear: rec.academicYear });
     } catch {
       // Best-effort.
     }
-    revalidatePath(`/recognition/${id}`);
+    revalidatePath(`/organizations/${rec.organizationId}/accreditation`);
     revalidatePath("/recognition");
     return { success: "Interview scheduled." };
   } catch (e) {
@@ -515,7 +554,7 @@ export async function recordInterviewOutcome(
       previousState: { interviewStatus: rec.interviewStatus },
       newState: { interviewStatus: outcomeKey, note: note || undefined },
     });
-    revalidatePath(`/recognition/${id}`);
+    revalidatePath(`/organizations/${rec.organizationId}/accreditation`);
     revalidatePath("/recognition");
     return { success: labels[outcomeKey] + "." };
   } catch (e) {
@@ -543,7 +582,7 @@ export async function quickStartRenewal(formData: FormData): Promise<void> {
     where: { organizationId_academicYear: { organizationId, academicYear: ay } },
   });
   if (duplicate) {
-    redirect(`/recognition/${duplicate.id}`);
+    redirect(`/organizations/${organizationId}/accreditation`);
   }
 
   const prior = await db.recognition.findFirst({
@@ -555,14 +594,46 @@ export async function quickStartRenewal(formData: FormData): Promise<void> {
   const rec = await db.recognition.create({
     data: { organizationId, kind: "RENEWAL", academicYear: ay, status: "DRAFT" },
   });
+
+  // §9: carry over the previous cycle's already-filed accreditation documents
+  // so officers do not re-submit the same constitution, adviser commitment,
+  // dean certification, etc. Fresh submittable documents (plan of activities,
+  // accomplishment reports) stay the new cycle's responsibility.
+  const priorAttachments = await db.attachment.findMany({
+    where: { entityType: "Recognition", entityId: prior.id },
+    select: { fileName: true, storedName: true, mimeType: true, sizeBytes: true, kind: true, uploadedById: true },
+  });
+  const CARRY_OVER_KINDS = new Set([
+    "CONSTITUTION",
+    "ADVISER_COMMITMENT",
+    "CERTIFICATION",
+  ]);
+  for (const a of priorAttachments) {
+    if (a.kind && CARRY_OVER_KINDS.has(a.kind)) {
+      await db.attachment.create({
+        data: {
+          entityType: "Recognition",
+          entityId: rec.id,
+          fileName: a.fileName,
+          storedName: a.storedName,
+          mimeType: a.mimeType,
+          sizeBytes: a.sizeBytes,
+          kind: a.kind,
+          uploadedById: a.uploadedById,
+        },
+      });
+    }
+  }
+
   await writeAudit({
     userId: user.id,
     action: "RENEWAL_STARTED",
     entityType: "Recognition",
     entityId: rec.id,
     entityLabel: `${org.name} · AY ${ay}`,
-    newState: { kind: "RENEWAL", academicYear: ay, status: "DRAFT" },
+    newState: { kind: "RENEWAL", academicYear: ay, status: "DRAFT", carriedOverDocs: "constitution/adviser-commitment/dean-certification" },
   });
+  revalidatePath(`/organizations/${organizationId}/accreditation`);
   revalidatePath("/recognition");
-  redirect(`/recognition/${rec.id}`);
+  redirect(`/organizations/${organizationId}/accreditation`);
 }

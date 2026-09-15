@@ -290,7 +290,7 @@ export default async function AccreditationProcessingPage({
                 {filtered.map((r) => (
                   <TR key={r.id}>
                     <TD>
-                      <Link href={`/recognition/${r.id}`} className="font-semibold text-primary hover:underline">
+                      <Link href={`/organizations/${r.organizationId}/accreditation`} className="font-semibold text-primary hover:underline">
                         {r.organization.acronym ?? r.organization.name}
                       </Link>
                       {r.organization.acronym && (
@@ -326,7 +326,7 @@ export default async function AccreditationProcessingPage({
                         {r.requirements.map((item) => (
                           <Badge
                             key={item.key}
-                            tone={item.met ? "success" : item.status === "RETURNED" ? "orange" : item.status === "UNDER_REVIEW" ? "info" : "neutral"}
+                            tone={item.met ? "success" : item.status === "RETURNED" ? "orange" : item.status === "UNDER_REVIEW" ? "info" : item.status === "UPLOADED" ? "primary" : "neutral"}
                             className="text-[10px] h-5 px-2"
                           >
                             {item.met ? "✓" : "○"} {item.label.split(" ")[0]}
@@ -338,19 +338,9 @@ export default async function AccreditationProcessingPage({
                       {formatDateTime(r.submittedAt)}
                     </TD>
                     <TD>
-                      <div className="flex items-center gap-2">
-                        <Link href={`/recognition/${r.id}`} className="text-xs font-semibold text-primary hover:underline">
-                          Open
-                        </Link>
-                        {r.organizationId && (
-                          <Link
-                            href={`/organizations/${r.organizationId}/accreditation`}
-                            className="text-xs text-content-secondary hover:text-primary"
-                          >
-                            Org View
-                          </Link>
-                        )}
-                      </div>
+                      <Link href={`/organizations/${r.organizationId}/accreditation`} className="text-xs font-semibold text-primary hover:underline">
+                        Open
+                      </Link>
                     </TD>
                   </TR>
                 ))}
@@ -362,7 +352,7 @@ export default async function AccreditationProcessingPage({
             {filtered.map((r) => (
               <li key={r.id}>
                 <Card className="p-4">
-                  <Link href={`/recognition/${r.id}`} className="block">
+                  <Link href={`/organizations/${r.organizationId}/accreditation`} className="block">
                     <div className="flex items-start justify-between gap-2">
                       <p className="min-w-0 truncate font-display text-sm font-bold text-content">
                         {r.organization.acronym ?? r.organization.name}
@@ -376,7 +366,7 @@ export default async function AccreditationProcessingPage({
                     </p>
                     <div className="mt-2 flex items-center justify-between">
                       <span className="text-xs text-content-secondary">{Math.round(r.compliance)}% complete</span>
-                      <Link href={`/recognition/${r.id}`} className="text-xs font-semibold text-primary hover:underline">
+                      <Link href={`/organizations/${r.organizationId}/accreditation`} className="text-xs font-semibold text-primary hover:underline">
                         Open
                       </Link>
                     </div>

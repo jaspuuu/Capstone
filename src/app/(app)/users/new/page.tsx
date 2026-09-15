@@ -22,7 +22,7 @@ export default async function NewUserPage() {
     <div className="mx-auto max-w-2xl">
       <PageHeader
         title="New user account"
-        description="Accounts inherit permissions from their system role."
+        description="Provision base accounts — OSAS, SOA, Dean, Adviser or Student. Officer positions are assigned through organization memberships, not here."
         breadcrumb={[{ label: "User accounts", href: "/users" }, { label: "New" }]}
         actions={
           <Link

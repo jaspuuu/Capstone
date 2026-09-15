@@ -26,6 +26,19 @@ enum Role {
   MEMBER
 }
 
+// Lifecycle of a person's account. A permanent account is independent of the
+// positions they hold inside organizations (officer/adviser authority comes
+// from memberships and assignments, not from the account). `isActive` on User
+// is the denormalized usable-flag kept in sync with this status so existing
+// `.isActive` filters stay cheap and unchanged.
+enum AccountStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+  DEACTIVATED
+  ARCHIVED
+}
+
 model User {
   id                 String      @id @default(cuid())
   email              String      @unique
@@ -42,6 +55,7 @@ model User {
   studentNumber      String?     @unique
   positionTitle      String?
   isActive           Boolean     @default(true)
+  accountStatus      AccountStatus @default(ACTIVE)
   isViewOnly         Boolean     @default(false)
   // Set when an admin issues a temporary password; the user must change it
   // before they can use the system.
@@ -67,7 +81,8 @@ model User {
   updatedMonitoring            ActivityMonitoring[]   @relation("MonitoringUpdatedBy")
   createdDeadlines             Deadline[]             @relation("DeadlineCreator")
   uploadedAttachments          Attachment[]           @relation("AttachmentUploader")
-  notifications                Notification[]         @relation("NotificationRecipient")
+  notifications            Notification[]         @relation("NotificationRecipient")
+  notificationPreferences  NotificationPreference[] @relation("NotificationPreferenceOwner")
   attendanceRecords            ActivityAttendance[]   @relation("ActivityAttendanceUser")
   recordedAttendance           ActivityAttendance[]   @relation("ActivityAttendanceRecorder")
   decisionsEvaluations         ActivityEvaluation[]   @relation("ActivityEvaluationEvaluator")
@@ -82,6 +97,7 @@ model User {
   decidedFinancialSubmissions  FinancialSubmission[]  @relation("FinancialSubmissionDecidedBy")
   archivedFinancialSubmissions FinancialSubmission[]  @relation("FinancialSubmissionArchiver")
   financialComments            FinancialComment[]     @relation("FinancialCommentAuthor")
+  completedFollowUps           RecognitionFollowUp[]  @relation("FollowUpCompleter")
 
   @@index([role])
   @@index([collegeId])
@@ -168,8 +184,14 @@ enum OrgApplicationStatus {
 
 enum MemberPosition {
   PRESIDENT
+  VICE_PRESIDENT
   SECRETARY
+  TREASURER
+  AUDITOR
+  PUBLIC_INFORMATION_OFFICER
+  BUSINESS_MANAGER
   MEMBER
+  OTHER
 }
 
 // Membership lifecycle: students apply, officers review, approved members
@@ -240,6 +262,7 @@ model Organization {
   activities           ActivityProposal[]
   reports              AccomplishmentReport[]
   financialSubmissions FinancialSubmission[]
+  notifications        Notification[]         @relation("NotificationOrg")
 
   @@index([collegeId])
   @@index([type])
@@ -328,10 +351,43 @@ model Recognition {
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
 
-  events RecognitionEvent[]
+  events   RecognitionEvent[]
+  followUp RecognitionFollowUp?
 
   @@unique([organizationId, academicYear])
   @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// Follow-up (§24): the official work instruction requires a follow-up one week
+// after submission for every application. Expected date is derived from the
+// recognition's submittedAt (automated), status/notes are recorded here.
+// ---------------------------------------------------------------------------
+
+enum FollowUpStatus {
+  PENDING
+  CONTACTED
+  COMPLETED
+  OVERDUE
+  SKIPPED
+}
+
+model RecognitionFollowUp {
+  id             String           @id @default(cuid())
+  recognitionId  String           @unique
+  recognition    Recognition      @relation(fields: [recognitionId], references: [id], onDelete: Cascade)
+  // Automated: submission date + 7 days (one-week follow-up window).
+  expectedDate   DateTime
+  status         FollowUpStatus   @default(PENDING)
+  notes          String?
+  completedAt    DateTime?
+  completedById  String?
+  completedBy    User?            @relation("FollowUpCompleter", fields: [completedById], references: [id])
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@index([status])
+  @@index([expectedDate])
 }
 
 model RecognitionEvent {
@@ -726,6 +782,9 @@ enum AttachmentKind {
   ADVISER_COMMITMENT
   CERTIFICATION
   FINANCIAL_REPORT
+  // Additional non-ISO document requirement — supporting evidence files that
+  // are not one of the six official SF forms.
+  SUPPORTING_DOCUMENTS
   // Financial-module file roles (tagged on FinancialSubmission attachments).
   FINANCIAL_DOCUMENT
   FINANCIAL_SUPPORTING
@@ -761,6 +820,7 @@ model Attachment {
   entityType   String
   entityId     String
   fileName     String
+  notes       String?
   storedName   String          @unique
   mimeType     String
   sizeBytes    Int
@@ -776,22 +836,89 @@ model Attachment {
 }
 
 // ---------------------------------------------------------------------------
-// In-app notifications (Part 9 - automated deadline notifications & alerts)
+// In-app notifications (Part 9 - workflow assistant)
 // Fan-out rows per recipient; created as a side effect of workflow events.
+// Priority drives the notification-center grouping; category drives the
+// user preference toggles (SIGNATURE/REVIEW/DEADLINE are mandatory and can
+// never be disabled because they carry an action the user must perform).
+// organizationId + entityType/entityId scope every row so reads and actions
+// can be authorization-checked server-side (never trust the client-supplied
+// id alone). `dedupKey` makes deadline reminders and grouped events
+// idempotent — a reminder/group is created once and never re-sent.
 // ---------------------------------------------------------------------------
 
+enum NotificationPriority {
+  ACTION_REQUIRED // red - the user must act
+  ATTENTION       // yellow - relevant soon (upcoming deadlines, interviews)
+  INFO            // blue - something changed, no action
+  SUCCESS         // green - a workflow step completed/approved
+}
+
+enum NotificationCategory {
+  SIGNATURE  // signature requests (mandatory)
+  REVIEW     // a document/workflow requires review approval (mandatory)
+  REVISION   // returned for revision (mandatory while action pending)
+  APPROVAL   // approve/reject outcomes on documents
+  DEADLINE   // deadline announcements + reminders (due/overdue mandatory)
+  INTERVIEW  // interview scheduling
+  SUBMISSION // a document/financial submission was filed
+  MEMBERSHIP // membership applications + decisions
+  ACTIVITY   // activity proposals, monitoring, scheduling
+  REPORT     // accomplishment reports
+  FINANCIAL  // financial submissions/comments
+  FOLLOW_UP  // recognition follow-up items
+  SYSTEM     // platform announcements
+}
+
 model Notification {
-  id        String    @id @default(cuid())
-  userId    String
-  user      User      @relation("NotificationRecipient", fields: [userId], references: [id], onDelete: Cascade)
-  type      String
-  title     String
-  body      String?
-  link      String?
-  readAt    DateTime?
-  createdAt DateTime  @default(now())
+  id             String                @id @default(cuid())
+  userId         String
+  user           User                  @relation("NotificationRecipient", fields: [userId], references: [id], onDelete: Cascade)
+  type           String
+  category       NotificationCategory  @default(SYSTEM)
+  priority       NotificationPriority  @default(INFO)
+  title          String
+  body           String?
+  link           String?
+  // Organizational/document scope for authorization checks.
+  organizationId String?
+  organization   Organization?         @relation("NotificationOrg", fields: [organizationId], references: [id], onDelete: Cascade)
+  // Academic year the notification belongs to. Relationship-scoped visibility
+  // (Fix #2) matches a user's current org relationship for THIS year at read
+  // time; past-AY rows stay visible in history but never as current tasks.
+  academicYear   String?
+  entityType     String?
+  entityId       String?
+  // "Why am I seeing this?" explanation rendered on the detail row.
+  reason         String?
+  // Grouped rows fold >1 related events into one row (e.g. "4 requirements
+  // need attention"); groupCount records how many events were merged.
+  groupKey       String?
+  groupCount     Int                   @default(1)
+  // Idempotency: deadline reminders / grouped sends carry a unique key so a
+  // lazy pass can never create a duplicate.
+  dedupKey       String?               @unique
+  expiresAt      DateTime?
+  readAt         DateTime?
+  archivedAt     DateTime?
+  createdAt      DateTime              @default(now())
 
   @@index([userId, readAt, createdAt])
+  @@index([organizationId])
+  @@index([academicYear])
+  @@index([entityType, entityId])
+  @@index([userId, archivedAt])
+}
+
+model NotificationPreference {
+  id        String               @id @default(cuid())
+  userId    String
+  user      User                 @relation("NotificationPreferenceOwner", fields: [userId], references: [id], onDelete: Cascade)
+  category  NotificationCategory
+  enabled   Boolean              @default(true)
+  updatedAt DateTime             @updatedAt
+
+  @@unique([userId, category])
 }
 
 // ---------------------------------------------------------------------------
@@ -886,4 +1013,57 @@ model FinancialComment {
   createdAt    DateTime            @default(now())
 
   @@index([submissionId])
+}
+
+/// Official LSPU-OSAS form templates (SF-001..SF-006). FIXED institutional
+/// documents: a new OSAS release creates a NEW row (version), it never edits
+/// one in place — historical documents keep the version they were issued under.
+model FormTemplate {
+  id              String   @id @default(cuid())
+  formCode        String   @unique // e.g. "LSPU-OSAS-SF-001"
+  formName        String
+  templateVersion String // e.g. "Rev. 109 November 2020"
+  effectiveDate   DateTime
+  status          String   @default("ACTIVE") // ACTIVE | SUPERSEDED | ARCHIVED
+  referenceFile   String? // source DOCX this digitization is validated against
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// Form draft overrides — stores editable field values per (form, org, AY).
+// The OFFICIAL DOCX remains the source of truth; these values are merged into
+// FormData at export time so signatures always bind to the rendered PDF.
+// ---------------------------------------------------------------------------
+
+model FormDocument {
+  id             String   @id @default(cuid())
+  formKey        String   // SF001..SF006
+  organizationId String
+  academicYear   String
+  data           Json     @default("{}") // FormDraftData overrides
+  version        Int      @default(1)
+  submittedAt    DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  versions       FormDocumentVersion[]
+
+  @@unique([formKey, organizationId, academicYear])
+  @@index([organizationId])
+}
+
+model FormDocumentVersion {
+  id             String   @id @default(cuid())
+  formDocumentId String
+  formDocument   FormDocument @relation(fields: [formDocumentId], references: [id], onDelete: Cascade)
+  version        Int
+  action         String   // DRAFT_SAVED | SUBMITTED | REVISION_RESUBMITTED
+  note           String?
+  data           Json
+  actorId        String?
+  createdAt      DateTime @default(now())
+
+  @@index([formDocumentId])
 }

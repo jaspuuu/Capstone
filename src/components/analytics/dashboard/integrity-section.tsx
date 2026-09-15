@@ -21,17 +21,23 @@ export function AnalyticsIntegrity(p: AnalyticsIntegrityProps) {
           No active organization in your scope triggers an integrity rule for {p.ay}.
         </Alert>
       ) : (
-        <ul className="space-y-3">
+        <ul className="divide-y divide-line">
           {p.dataIssues.map((d) => (
-            <li key={d.id} className="rounded-xl border border-line p-4">
+            <li key={d.id} className="py-4 first:pt-0 last:pb-0">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-sm font-bold text-content">{d.title}</p>
+                <div className="flex items-center gap-2.5">
+                  <span
+                    className={`size-2 shrink-0 rounded-full ${d.severity === "HIGH" ? "bg-danger" : d.severity === "MEDIUM" ? "bg-warning" : "bg-content-muted"}`}
+                    aria-hidden
+                  />
+                  <p className="text-sm font-semibold text-content">{d.title}</p>
+                </div>
                 <Badge tone={d.severity === "HIGH" ? "danger" : d.severity === "MEDIUM" ? "warning" : "neutral"}>
                   {d.severity}
                 </Badge>
               </div>
               <p className="mt-1 text-xs text-content-secondary">{d.detail}</p>
-              <p className="mt-2 rounded-lg bg-primary-light px-3 py-2 text-xs font-semibold text-primary">Rule: {d.why}</p>
+              <p className="mt-1.5 text-xs leading-relaxed text-content-muted">Rule — {d.why}</p>
               {d.href && (
                 <div className="mt-2">
                   <Link href={d.href} className="text-xs font-semibold text-primary hover:underline">

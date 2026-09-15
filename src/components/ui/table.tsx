@@ -17,10 +17,16 @@ export function TableWrap({
   );
 }
 
-export function THead({ children }: { children: React.ReactNode }) {
+export function THead({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
   return (
     <thead>
-      <tr className="border-b border-line bg-surface-secondary/60">
+      <tr className={cn("border-b border-line bg-surface-secondary/60", className)}>
         {children}
       </tr>
     </thead>

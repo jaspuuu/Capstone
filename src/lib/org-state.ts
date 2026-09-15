@@ -17,6 +17,7 @@ export type OrgState =
   | "PENDING_RENEWAL"
   | "EXPIRED"
   | "INACTIVE"
+  | "ARCHIVED"
   | "REJECTED"
   | "ACTIVE"
   | "DRAFT"
@@ -36,9 +37,10 @@ const IN_REVIEW = new Set([
 ]);
 
 export function deriveOrgState(
-  org: Pick<Organization, "status" | "applicationStatus">,
+  org: Pick<Organization, "status" | "applicationStatus"> & { archivedAt?: Date | null },
   recognitions: Pick<Recognition, "academicYear" | "status">[]
 ): OrgState {
+  if (org.archivedAt) return "ARCHIVED";
   if (org.status === "INACTIVE") return "INACTIVE";
 
   // §5: a freshly-created organization is not yet active/recognized. Only a
@@ -81,11 +83,20 @@ export function deriveOrgState(
   const lastSatisfied = sorted.find((r) => SATISFIED.has(r.status));
   if (lastSatisfied) {
     // Recognized in a previous academic year with nothing filed since.
-    return compareAcademicYear(lastSatisfied.academicYear, ay) < 0 ? "PENDING_RENEWAL" : "RECOGNIZED";
+    const yearsSince = compareAcademicYear(ay, lastSatisfied.academicYear);
+    if (yearsSince > 0) return "PENDING_RENEWAL";
+    if (yearsSince === 0) return "RECOGNIZED";
   }
 
+  // A previously-current recognition that has since expired/not been renewed.
+  // If the org was active in a past year but has no current-year activity
+  // and its last recognition was not satisfied, it is expired.
   const latest = sorted[0];
+  if (latest && latest.academicYear !== ay && latest.status === "EXPIRED") return "EXPIRED";
   if (latest?.status === "REJECTED") return "REJECTED";
+  if (latest && compareAcademicYear(latest.academicYear, ay) < 0 && latest.status === "RECOGNIZED" && !lastSatisfied?.status) {
+    return "EXPIRED";
+  }
 
   // An org whose application passed all reviews is established.
   return "RECOGNIZED";

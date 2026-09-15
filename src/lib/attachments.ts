@@ -31,6 +31,7 @@ export const ALLOWED_MIME_TYPES: Record<string, string> = {
   "image/jpeg": ".jpg",
   "image/webp": ".webp",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
 };
 
 /** Maps a parent entity type to its Prisma delegate name for ownership checks. */
@@ -41,38 +42,11 @@ export function isAttachableEntity(t: string): t is AttachableEntity {
   return (ATTACHABLE_ENTITIES as readonly string[]).includes(t);
 }
 
-/**
- * SF-001 accreditation checklist items a Recognition attachment may satisfy.
- * The application/renewal letter itself is the recognition submission, so it
- * has no upload kind; the other six requirements are tagged on upload and
- * drive the compliance indicators in the analytics dashboard.
- */
-export const ATTACHMENT_KINDS = [
-  "CONSTITUTION",
-  "PLAN_OF_ACTIVITIES",
-  "ACCOMPLISHMENT_REPORTS",
-  "ADVISER_COMMITMENT",
-  "CERTIFICATION",
-  "FINANCIAL_REPORT",
-] as const;
-export type AttachmentKind = (typeof ATTACHMENT_KINDS)[number];
-
-export const ATTACHMENT_KIND_LABELS: Record<AttachmentKind, string> = {
-  CONSTITUTION: "Constitution and By-Laws",
-  PLAN_OF_ACTIVITIES: "Plan of Activities",
-  ACCOMPLISHMENT_REPORTS: "Accomplishment Reports",
-  ADVISER_COMMITMENT: "Adviser's Commitment Form",
-  CERTIFICATION: "Dean's Certification",
-  FINANCIAL_REPORT: "Financial Report",
-};
-
-export function isAttachmentKind(value: string): value is AttachmentKind {
-  return (ATTACHMENT_KINDS as readonly string[]).includes(value);
-}
+export { ATTACHMENT_KINDS, type AttachmentKind, ATTACHMENT_KIND_LABELS, isAttachmentKind } from "./attachment-types";
 
 export function validateFile(mimeType: string, sizeBytes: number): string | null {
   if (!ALLOWED_MIME_TYPES[mimeType]) {
-    return "Only PDF, PNG, JPEG, WebP, or Word (.docx) files are allowed.";
+    return "Only PDF, PNG, JPEG, WebP, Word (.docx), or Excel (.xlsx) files are allowed.";
   }
   if (sizeBytes > MAX_ATTACHMENT_BYTES) {
     return "Files may not exceed 10 MB.";

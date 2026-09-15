@@ -15,7 +15,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { TableWrap, THead, TH, TR, TD } from "@/components/ui/table";
 export const instant = false;
 
-/** §22: documents submitted vs the seven SF-001 requirements. */
+/** §22: documents submitted vs the eight SF-001 requirements. */
 function ProgressCell({
   rec,
   kinds,
@@ -32,7 +32,7 @@ function ProgressCell({
   const done = items.filter((i) => i.met).length;
   const pct = Math.round((done / items.length) * 100);
   return (
-    <div className="flex items-center gap-2" title={`${done} of ${items.length} SF-001 requirements submitted`}>
+    <div className="flex items-center gap-2" title={`${done} of ${items.length} SF-001 requirements completed`}>
       <div className="h-1.5 w-20 overflow-hidden rounded-full bg-surface-secondary">
         <div
           className={`h-full rounded-full ${pct === 100 ? "bg-success" : pct >= 50 ? "bg-gold" : "bg-danger"}`}
@@ -56,6 +56,11 @@ export default async function RecognitionPage({
   searchParams: Promise<Search>;
 }) {
   const user = await requireUser();
+  // Plain members cannot open the internal accreditation page — route them to
+  // the organization profile (which shows application/recognition status).
+  const isMember = user.role === "MEMBER";
+  const accHref = (orgId: string) =>
+    isMember ? `/organizations/${orgId}` : `/organizations/${orgId}/accreditation`;
   const sp = await searchParams;
   const ay = await getSelectedAy();
 
@@ -212,7 +217,7 @@ export default async function RecognitionPage({
                 {records.map((r) => (
                   <TR key={r.id}>
                     <TD>
-                      <Link href={`/recognition/${r.id}`} className="font-semibold text-primary hover:underline">
+                      <Link href={accHref(r.organization.id)} className="font-semibold text-primary hover:underline">
                         {r.organization.acronym ?? r.organization.name}
                       </Link>
                       {r.organization.acronym && (
@@ -243,7 +248,7 @@ export default async function RecognitionPage({
                       {r.decidedBy ? fullName(r.decidedBy) : "—"}
                     </TD>
                     <TD>
-                      <Link href={`/recognition/${r.id}`} className="text-xs font-semibold text-primary hover:underline">
+                      <Link href={accHref(r.organization.id)} className="text-xs font-semibold text-primary hover:underline">
                         Open
                       </Link>
                     </TD>
@@ -257,7 +262,7 @@ export default async function RecognitionPage({
             {records.map((r) => (
               <li key={r.id}>
                 <Link
-                  href={`/recognition/${r.id}`}
+                  href={accHref(r.organization.id)}
                   className="block rounded-xl border border-line bg-surface p-4 shadow-card active:bg-surface-secondary"
                 >
                   <div className="flex items-start justify-between gap-2">

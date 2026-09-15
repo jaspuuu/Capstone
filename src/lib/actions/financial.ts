@@ -6,7 +6,14 @@ import { requirePermissionOrThrow, requireUser } from "@/lib/auth/guards";
 import { can, isAdminRole } from "@/lib/auth/rbac";
 import type { AuthUser } from "@/lib/auth/session";
 import { writeAudit } from "@/lib/audit";
-import { notifyOrgAdvisers, notifyOrgOfficers, notifyUsers } from "@/lib/notifications";
+import {
+  notifyOrgAdvisers,
+  notifyOrgOfficers,
+  notifyUsers,
+  type NotificationInput,
+  type OrgAudienceOptions,
+} from "@/lib/notifications";
+import { EXCLUSIVE_OFFICER_POSITIONS } from "@/lib/membership-exclusivity";
 import {
   deleteAttachmentFile,
   newStoredName,
@@ -138,12 +145,17 @@ async function pickFinancialDeadline(
 async function notifyReviewers(submission: SubmissionDetail) {
   const orgId = submission.organization.id;
   const link = orgFinancialPath(orgId);
-  await notifyOrgAdvisers(orgId, {
-    type: "FINANCIAL_SUBMITTED",
-    title: `${submission.organization.name} — ${submission.requirement.name} submitted`,
-    body: `Ready for review and signature.`,
-    link,
-  });
+await notifyOrgAdvisers(orgId, {
+      type: "FINANCIAL_SUBMITTED",
+      category: "REVIEW",
+      priority: "ACTION_REQUIRED",
+      title: `${submission.organization.name} — ${submission.requirement.name} submitted`,
+      body: `Ready for review and signature.`,
+      link,
+      entityType: "FinancialSubmission",
+      entityId: submission.id,
+      reason: "You are an adviser of this organization and must review its financial submission.",
+    }, { academicYear: submission.academicYear });
   const college = await db.college.findFirst({
     where: { organizations: { some: { id: orgId } } },
     select: { deanId: true },
@@ -156,9 +168,15 @@ async function notifyReviewers(submission: SubmissionDetail) {
     [...(college?.deanId ? [college.deanId] : []), ...office.map((u) => u.id)],
     {
       type: "FINANCIAL_SUBMITTED",
+      category: "REVIEW",
+      priority: "ATTENTION",
       title: `${submission.organization.name} — ${submission.requirement.name} submitted`,
       body: `Financial submission awaiting signature from ${submission.organization.name}.`,
       link,
+      entityType: "FinancialSubmission",
+      entityId: submission.id,
+      academicYear: submission.academicYear,
+      reason: "You administrate college recognition processes that include this financial stage.",
     }
   );
 }
@@ -421,10 +439,15 @@ export async function archiveFinancialSubmission(
     await writeAudit({ userId: user.id, action: "FINANCIAL_ARCHIVED", entityType: ENTITY_TYPE, entityId: submissionId, entityLabel: submission.requirement.name, previousState: { status: submission.status }, newState: { status: "ARCHIVED" } });
     await notifyOrgOfficers(submission.organizationId, {
       type: "FINANCIAL_ARCHIVED",
+      category: "FINANCIAL",
+      priority: "INFO",
       title: `${submission.requirement.name} archived`,
       body: "OSAS has archived the completed financial submission.",
       link: orgFinancialPath(submission.organizationId),
-    });
+      entityType: ENTITY_TYPE,
+      entityId: submissionId,
+      reason: "You lead this organization; its financial record was archived.",
+    }, { academicYear: submission.academicYear });
     fullRevalidate(submission.organizationId);
     return { ok: "Submission archived." };
   } catch (e) {
@@ -457,10 +480,15 @@ export async function addFinancialComment(
     const link = orgFinancialPath(orgId);
     await notifyOrgOfficersAndAdvisersExcept(orgId, user.id, {
       type: "FINANCIAL_COMMENT",
+      category: "FINANCIAL",
+      priority: "INFO",
       title: `New comment on ${submission.requirement.name}`,
       body,
       link,
-    });
+      entityType: ENTITY_TYPE,
+      entityId: submissionId,
+      reason: `You are involved with this organization's ${submission.requirement.name} submission.`,
+    }, { academicYear: submission.academicYear });
     fullRevalidate(orgId);
     return { ok: "Comment added." };
   } catch (e) {
@@ -471,22 +499,36 @@ export async function addFinancialComment(
 async function notifyOrgOfficersAndAdvisersExcept(
   organizationId: string,
   exceptUserId: string,
-  payload: { type: string; title: string; body?: string; link?: string }
+  payload: NotificationInput,
+  opts: OrgAudienceOptions = {}
 ) {
+  // Fix #2: financial comments are officers + advisers only — regular members
+  // never see them. Officers are all seat-holding positions; past-AY or
+  // removed rows are excluded.
   const [members, advisers] = await Promise.all([
     db.organizationMember.findMany({
-      where: { organizationId, isCurrent: true },
+      where: {
+        organizationId,
+        isCurrent: true,
+        position: { in: [...EXCLUSIVE_OFFICER_POSITIONS] },
+        status: { in: ["ACTIVE", "APPROVED"] },
+        ...(opts.academicYear ? { academicYear: opts.academicYear } : {}),
+      },
       select: { userId: true },
     }),
     db.adviserAssignment.findMany({
-      where: { organizationId, isCurrent: true },
+      where: {
+        organizationId,
+        isCurrent: true,
+        ...(opts.academicYear ? { academicYear: opts.academicYear } : {}),
+      },
       select: { adviserId: true },
     }),
   ]);
   const ids = [...new Set([...members.map((m) => m.userId), ...advisers.map((a) => a.adviserId)])].filter(
     (id) => id !== exceptUserId
   );
-  await notifyUsers(ids, payload);
+  await notifyUsers(ids, { ...payload, academicYear: opts.academicYear ?? payload.academicYear ?? null });
 }
 
 // ---------------------------------------------------------------------------
@@ -534,16 +576,26 @@ export async function syncFinancialSubmission(params: {
       if (status === "RETURNED") {
         await notifyOrgOfficers(sub.organizationId, {
           type: "FINANCIAL_RETURNED",
+          category: "REVISION",
+          priority: "ACTION_REQUIRED",
           title: "Financial submission returned for revision",
           body: `A reviewer returned a submission for ${sub.id}. Correct the documents and resubmit.`,
           link: orgPath,
-        });
+          entityType: ENTITY_TYPE,
+          entityId: sub.id,
+          reason: "Your submission was returned; the signature chain is blocked until you correct it.",
+        }, { academicYear: sub.academicYear });
       } else if (status === "APPROVED" && sub.status !== "APPROVED") {
         await notifyOrgOfficers(sub.organizationId, {
           type: "FINANCIAL_APPROVED",
+          category: "APPROVAL",
+          priority: "SUCCESS",
           title: "Financial submission approved",
           link: orgPath,
-        });
+          entityType: ENTITY_TYPE,
+          entityId: sub.id,
+          reason: "The submission chain you lead was fully signed and approved.",
+        }, { academicYear: sub.academicYear });
       }
       revalidatePath(orgPath);
       revalidatePath("/financial");

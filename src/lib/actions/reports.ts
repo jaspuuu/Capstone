@@ -409,11 +409,20 @@ function transitionAction(transition: keyof typeof TRANSITIONS) {
     if (outcome) {
       try {
         await notifyOrgOfficers(report.organizationId, {
-          type: outcome.type,
-          title: `${outcome.title}: ${report.title}`,
-          body: note ? `Note: ${note.slice(0, 160)}` : undefined,
-          link: `/reports/${id}`,
-        });
+      type: outcome.type,
+      category: transition === "RETURN" ? "REVISION" : "APPROVAL",
+      priority: transition === "RETURN" ? "ACTION_REQUIRED" : "SUCCESS",
+      title: `${outcome.title}: ${report.title}`,
+      body: note ? `Note: ${note.slice(0, 160)}` : undefined,
+      link: `/reports/${id}`,
+      entityType: "AccomplishmentReport",
+      entityId: id,
+      academicYear: report.academicYear,
+      reason:
+        transition === "RETURN"
+          ? "Your report needs revision; the review is blocked until it is re-submitted."
+          : "The review you submitted was decided.",
+    }, { academicYear: report.academicYear });
       } catch {
         // Best-effort.
       }

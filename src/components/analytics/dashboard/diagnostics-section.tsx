@@ -7,6 +7,9 @@ export type AnalyticsDiagnosticsProps = {
   workflowDelays: { stage: string; days: number }[];
   full: boolean;
   bottleneckList: { label: string; count: number }[];
+  revisionReasons: { reason: string; count: number }[];
+  revisionTotal: number;
+  repeatedRevisionCount: number;
 };
 
 export function AnalyticsDiagnostics(p: AnalyticsDiagnosticsProps) {
@@ -33,9 +36,9 @@ export function AnalyticsDiagnostics(p: AnalyticsDiagnosticsProps) {
         <CardHeader title="Workflow stage delays" description="Average calendar days between recorded milestones on accreditation applications (only configured stages)." />
         <CardContent>
           {p.workflowDelays.length > 0 ? (
-            <dl className="space-y-3">
+            <dl className="divide-y divide-line">
               {p.workflowDelays.map((s) => (
-                <div key={s.stage} className="flex items-center justify-between gap-2 rounded-xl border border-line px-4 py-3">
+                <div key={s.stage} className="flex items-center justify-between gap-2 py-2.5 first:pt-0 last:pb-0">
                   <dt className="text-sm font-medium text-content-secondary">{s.stage}</dt>
                   <dd className="font-display text-lg font-bold text-content tabular-nums">
                     {s.days}
@@ -55,9 +58,9 @@ export function AnalyticsDiagnostics(p: AnalyticsDiagnosticsProps) {
           <CardHeader title="Document bottlenecks" description="Signature-routed forms currently awaiting action, by signatory role." />
           <CardContent>
             {p.bottleneckList.length > 0 ? (
-              <dl className="space-y-3">
+              <dl className="divide-y divide-line">
                 {p.bottleneckList.map((b) => (
-                  <div key={b.label} className="flex items-center justify-between gap-2 rounded-xl border border-line px-4 py-3">
+                  <div key={b.label} className="flex items-center justify-between gap-2 py-2.5 first:pt-0 last:pb-0">
                     <dt className="text-sm font-medium text-content-secondary">{b.label}</dt>
                     <dd className="font-display text-lg font-bold text-content tabular-nums">{b.count}</dd>
                   </div>
@@ -69,6 +72,42 @@ export function AnalyticsDiagnostics(p: AnalyticsDiagnosticsProps) {
           </CardContent>
         </Card>
       )}
+      <Card>
+        <CardHeader title="Common revision reasons" description="Why accreditation applications were returned for revision, ranked by frequency across recorded returns." />
+        <CardContent className="space-y-4">
+          {p.revisionReasons.length > 0 ? (
+            p.revisionReasons.map((r) => (
+              <HBar
+                key={r.reason}
+                label={r.reason}
+                percent={Math.round((r.count / Math.max(1, p.revisionTotal)) * 100)}
+                rightText={`${r.count}/${p.revisionTotal}`}
+              />
+            ))
+          ) : (
+            <NoData what="No application returns have been recorded in this scope." />
+          )}
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader title="Repeated revisions" description="Applications returned for revision more than once — a candidate for targeted guidance or mandatory pre-check." />
+        <CardContent className="space-y-3">
+          {p.repeatedRevisionCount > 0 ? (
+            <>
+              <p className="text-3xl font-bold text-content tabular-nums">
+                {p.repeatedRevisionCount}
+                <span className="ml-2 text-sm font-medium text-content-secondary">application(s) returned 2+ times</span>
+              </p>
+              <p className="text-xs text-content-muted">
+                Each repeat return usually signals the same underlying gaps. The pre-submission checklist (Submission Validation Gate)
+                helps catch these before the application is filed.
+              </p>
+            </>
+          ) : (
+            <NoData what="No application has been returned more than once in this scope. Pre-submission checks appear to be working." />
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

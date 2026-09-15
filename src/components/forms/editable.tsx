@@ -48,9 +48,11 @@ export const Editable = memo(function Editable({
 export function PrintToolbar({
   backHref,
   title,
+  download,
 }: {
   backHref: string;
   title: string;
+  download?: { href: string; label?: string };
 }) {
   return (
     <div className="no-print fixed inset-x-0 top-0 z-50 flex items-center justify-between gap-3 border-b border-line bg-surface px-4 py-2.5 shadow-sm">
@@ -67,6 +69,15 @@ export function PrintToolbar({
         >
           Dashboard
         </a>
+        {download && (
+          <a
+            href={download.href}
+            download
+            className="inline-flex h-9 items-center rounded-lg border border-line px-3 text-sm font-semibold text-content-secondary hover:bg-surface-secondary hover:text-content"
+          >
+            Download DOCX
+          </a>
+        )}
       </div>
       <p className="hidden text-xs text-content-secondary lg:block">
         {title} · Click any blank or cell to fill it in, then print.

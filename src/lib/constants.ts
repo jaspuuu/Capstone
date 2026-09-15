@@ -1,4 +1,4 @@
-import type { Role } from "@/generated/prisma/client";
+import type { AccountStatus, Role } from "@/generated/prisma/client";
 
 // ---------------------------------------------------------------------------
 // Role labels
@@ -27,6 +27,28 @@ export const SHORT_ROLE_LABELS: Record<Role, string> = {
 };
 
 export const ADMIN_ROLES: Role[] = ["OSAS", "SOA"];
+
+// Officer positions are assigned through organization memberships (§new model),
+// never provisioned onto an account. `OFFICER_ROLES` lists the historical
+// account-level roles that admins must no longer mint.
+export const OFFICER_ROLES: Role[] = ["PRESIDENT", "SECRETARY"];
+
+export function isOfficerRole(role: Role): boolean {
+  return OFFICER_ROLES.includes(role);
+}
+
+// ---------------------------------------------------------------------------
+// Account lifecycle (§account model). `accountStatus` on User drives sign-in,
+// while `isActive` stays the denormalized usable-flag for existing filters.
+// ---------------------------------------------------------------------------
+
+export const ACCOUNT_STATUS_META: Record<AccountStatus, StatusMeta> = {
+  PENDING: { label: "Pending", tone: "warning" },
+  ACTIVE: { label: "Active", tone: "success" },
+  SUSPENDED: { label: "Suspended", tone: "orange" },
+  DEACTIVATED: { label: "Deactivated", tone: "danger" },
+  ARCHIVED: { label: "Archived", tone: "neutral" },
+};
 
 // ---------------------------------------------------------------------------
 // Status labels + badge tones.
@@ -60,9 +82,10 @@ export const RECOGNITION_STATUS_META: Record<string, StatusMeta> = {
 
 export const ORG_STATE_META: Record<string, StatusMeta> = {
   RECOGNIZED: { label: "Recognized", tone: "gold" },
-  PENDING_RENEWAL: { label: "Pending Renewal", tone: "warning" },
-  EXPIRED: { label: "Expired", tone: "neutral" },
+  PENDING_RENEWAL: { label: "Renewal Due", tone: "warning" },
+  EXPIRED: { label: "Not Renewed", tone: "neutral" },
   INACTIVE: { label: "Inactive", tone: "neutral" },
+  ARCHIVED: { label: "Archived", tone: "neutral" },
   REJECTED: { label: "Rejected", tone: "danger" },
   ACTIVE: { label: "Active", tone: "success" },
   DRAFT: { label: "Draft", tone: "neutral" },
@@ -93,13 +116,23 @@ export const INTERVIEW_STATUS_META: Record<string, StatusMeta> = {
   NEEDS_REVISION: { label: "Needs revision", tone: "danger" },
 };
 
+/** §24: follow-up status after submission (one week after submission date). */
+export const FOLLOW_UP_STATUS_META: Record<string, StatusMeta> = {
+  PENDING: { label: "Pending", tone: "neutral" },
+  CONTACTED: { label: "Contacted", tone: "info" },
+  COMPLETED: { label: "Completed", tone: "success" },
+  OVERDUE: { label: "Overdue", tone: "danger" },
+  SKIPPED: { label: "Skipped", tone: "neutral" },
+};
+
 /** §23: per-document lifecycle shown in the repository and progress bars. */
 export const REQUIREMENT_STATUS_META: Record<string, StatusMeta> = {
-  REQUIRED: { label: "Required", tone: "neutral" },
-  SUBMITTED: { label: "Submitted", tone: "info" },
-  UNDER_REVIEW: { label: "Under Review", tone: "warning" },
+  REQUIRED: { label: "Not Started", tone: "neutral" },
+  UPLOADED: { label: "Uploaded", tone: "primary" },
+  SUBMITTED: { label: "Submitted", tone: "warning" },
+  UNDER_REVIEW: { label: "Under Review", tone: "info" },
   APPROVED: { label: "Approved", tone: "success" },
-  RETURNED: { label: "Returned", tone: "orange" },
+  RETURNED: { label: "Needs Revision", tone: "orange" },
 };
 
 export const PROPOSAL_STATUS_META: Record<string, StatusMeta> = {
@@ -178,9 +211,17 @@ export const ADVISER_TYPE_LABELS: Record<string, string> = {
 
 export const MEMBER_POSITION_LABELS: Record<string, string> = {
   PRESIDENT: "President",
+  VICE_PRESIDENT: "Vice President",
   SECRETARY: "Secretary",
+  TREASURER: "Treasurer",
+  AUDITOR: "Auditor",
+  PUBLIC_INFORMATION_OFFICER: "Public Information Officer",
+  BUSINESS_MANAGER: "Business Manager",
   MEMBER: "Member",
+  OTHER: "Other Position",
 };
+
+export const ASSIGNABLE_POSITIONS = Object.keys(MEMBER_POSITION_LABELS);
 
 export const AUDIT_ACTION_LABELS: Record<string, string> = {
   LOGIN: "Signed in",
@@ -191,6 +232,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   USER_UPDATED: "Updated user account",
   USER_DEACTIVATED: "Deactivated user account",
   USER_ACTIVATED: "Reactivated user account",
+  USER_STATUS_CHANGED: "Changed account status",
   COLLEGE_CREATED: "Created college",
   COLLEGE_UPDATED: "Updated college",
   DEPARTMENT_CREATED: "Created department",
@@ -246,6 +288,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   CHECKIN_OPENED: "Opened check-in",
   CHECKIN_CLOSED: "Closed check-in",
   MONITORING_UPDATED: "Updated activity monitoring",
+  FOLLOW_UP_RECORDED: "Recorded follow-up",
 };
 
 // ---------------------------------------------------------------------------

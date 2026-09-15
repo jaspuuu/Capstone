@@ -67,13 +67,33 @@ async function main() {
   const { status: s1, text: t1 } = await fetchText("/analytics", tokens.OSAS);
   rec("OSAS /analytics returns 200", s1 === 200, `status=${s1}`);
   rec("OSAS /analytics not redirected to login", !t1.includes(LOGIN_MARKER));
-  rec("OSAS /analytics shows compliance matrix", t1.includes("Organization compliance matrix"));
-  rec("OSAS /analytics shows accreditation layer", t1.includes("Accreditation compliance"));
-  rec("OSAS /analytics shows monitoring layer", t1.includes("Monitoring &amp; evaluation"));
-  rec("OSAS /analytics shows alerts layer", t1.includes("Alerts"));
-  rec("OSAS /analytics shows export action", t1.includes("Export CSV"));
-  rec("OSAS /analytics shows data integrity section", t1.includes("Data integrity"));
-  rec("OSAS /analytics shows rubric M&E (seeded eval)", t1.includes("Rubric-based evaluations entered by officers"));
+  rec("OSAS overview shows the view tabs", t1.includes("Overview") && t1.includes("Data Quality"));
+  rec("OSAS overview shows accreditation KPI", t1.includes("Accreditation compliance"));
+  rec("OSAS overview shows export action", t1.includes("Export CSV"));
+
+  const tc = await fetchText("/analytics?view=compliance", tokens.OSAS);
+  rec("OSAS compliance view 200", tc.status === 200, `status=${tc.status}`);
+  rec("OSAS compliance view shows matrix", tc.text.includes("Organization compliance matrix"));
+  rec("OSAS compliance view shows revision diagnostics", tc.text.includes("Common revision reasons") && tc.text.includes("Repeated revisions"));
+  rec("OSAS compliance view shows workflow delays", tc.text.includes("Workflow stage delays") && tc.text.includes("Most frequently missed requirements"));
+
+  const ta = await fetchText("/analytics?view=activities", tokens.OSAS);
+  rec("OSAS activities view 200", ta.status === 200, `status=${ta.status}`);
+  rec("OSAS activities view shows M&E", ta.text.includes("Monitoring &amp; evaluation"));
+  rec("OSAS activities view shows rubric M&E (seeded eval)", ta.text.includes("Rubric-based evaluations entered by officers"));
+  rec("OSAS activities view shows attendance", ta.text.includes("Attendance analytics"));
+
+  const tal = await fetchText("/analytics?view=alerts", tokens.OSAS);
+  rec("OSAS alerts view 200", tal.status === 200, `status=${tal.status}`);
+  rec("OSAS alerts view shows alert panel", tal.text.includes("Alerts &amp; recommendations"));
+
+  const tq = await fetchText("/analytics?view=quality", tokens.OSAS);
+  rec("OSAS data quality view 200", tq.status === 200, `status=${tq.status}`);
+  rec("OSAS data quality view shows integrity", tq.text.includes("Data integrity"));
+
+  const tt = await fetchText("/analytics?view=trends", tokens.OSAS);
+  rec("OSAS trends view 200", tt.status === 200, `status=${tt.status}`);
+  rec("OSAS trends view shows membership cycle", tt.text.includes("Membership per cycle") && tt.text.includes("Accreditation compliance trend"));
 
   const { status: s2, text: t2 } = await fetchText("/analytics?type=CHILD&rec=APPROVED&ay=2026-2027", tokens.OSAS);
   rec("OSAS filtered /analytics 200", s2 === 200, `status=${s2}`);
@@ -129,12 +149,28 @@ async function main() {
   rec("OSAS monitoring report not login", !t11.includes(LOGIN_MARKER));
   rec("OSAS monitoring report shows sheet", t11.includes("PLAN OF ACTIVITIES MONITORING REPORT"));
 
-  const sampleRec = await prisma.recognition.findFirst({ select: { id: true } });
+  const sampleRec = await prisma.recognition.findFirst({ select: { id: true, organizationId: true } });
   if (sampleRec) {
-    const { status: s12, text: t12 } = await fetchText(`/recognition/${sampleRec.id}`, tokens.OSAS);
-    rec("OSAS recognition detail 200", s12 === 200, `status=${s12}`);
-    rec("OSAS recognition detail shows record", t12.includes("Application record") || t12.includes("History"));
-    rec("OSAS recognition detail not login", !t12.includes(LOGIN_MARKER));
+    const { status: s12, text: t12 } = await fetchText(`/organizations/${sampleRec.organizationId}/accreditation`, tokens.OSAS);
+    rec("OSAS accreditation page 200", s12 === 200, `status=${s12}`);
+    rec("OSAS accreditation page shows requirements", t12.includes("Requirements") || t12.includes("Activity History"), "");
+    rec("OSAS accreditation page not login", !t12.includes(LOGIN_MARKER));
+    const sampleFollowUp = await prisma.recognitionFollowUp.findFirst({
+      where: { status: { in: ["PENDING", "CONTACTED", "OVERDUE"] } },
+      select: { recognition: { select: { organizationId: true } } },
+    });
+    if (sampleFollowUp) {
+      const { status: s12f, text: t12f } = await fetchText(`/organizations/${sampleFollowUp.recognition.organizationId}/accreditation`, tokens.OSAS);
+      rec("OSAS accreditation shows follow-up card", s12f === 200 && t12f.includes("Follow-up"), `status=${s12f}`);
+    } else {
+      rec("fixture: pending follow-up exists", false, "no PENDING/OVERDUE RecognitionFollowUp — run `npm run db:seed`");
+    }
+    const { status: s12r, text: t12r } = await fetchText(`/recognition/${sampleRec.id}`, tokens.OSAS);
+    rec(
+      "OSAS recognition detail redirects to org context",
+      s12r === 200 && t12r.includes(`/organizations/${sampleRec.organizationId}/accreditation`),
+      `status=${s12r} target=${s12r === 200 && t12r.includes(`/organizations/${sampleRec.organizationId}/accreditation`)}`
+    );
   } else {
     rec("fixture: seeded recognition exists", false, "no Recognition rows — run `npm run db:seed`");
   }
@@ -156,6 +192,11 @@ async function main() {
   await sweep("OSAS /deadlines/new", "/deadlines/new");
   await sweep("OSAS /audit-log", "/audit-log", "Audit log");
   await sweep("OSAS /notifications", "/notifications", "Notifications");
+  const tn = await fetchText("/notifications", tokens.OSAS);
+  rec("OSAS notifications shows priority legend", tn.text.includes("Action required") && tn.text.includes("Attention") && tn.text.includes("Preferences"));
+  await sweep("OSAS /notifications/preferences", "/notifications/preferences", "Notification preferences");
+  const tpref = await fetchText("/notifications/preferences", tokens.OSAS);
+  rec("OSAS preferences lists categories", tpref.text.includes("Signature") && tpref.text.includes("Deadlines") && tpref.text.includes("Follow-up"));
   await sweep("OSAS /organizations", "/organizations", "Organizations");
   await sweep("OSAS /organizations/new", "/organizations/new");
   await sweep("OSAS /profile", "/profile", "My profile");
@@ -226,11 +267,14 @@ async function main() {
   await sweep("OSAS org documents", `${orgPath}/documents`);
 
   const sfQ = `?org=${sampleOrg.id}&ay=2026-2027`;
-  await sweep("OSAS sf-002 renewal", `/forms/sf-002${sfQ}`, "ORGANIZATION RENEWAL FORM");
-  await sweep("OSAS sf-003 adviser", `/forms/sf-003${sfQ}`, "ORGANIZATION ADVISER COMMITMENT FORM");
-  await sweep("OSAS sf-004 plan", `/forms/sf-004${sfQ}`, "Plan of Activities");
-  await sweep("OSAS sf-005 roster", `/forms/sf-005${sfQ}`, "LIST OF MEMBERS OF THE ORGANIZATION");
-  await sweep("OSAS sf-006 cert", `/forms/sf-006?org=${sampleOrg.id}`, "CERTIFICATION");
+  // SF pages now render the three-mode workspace around the official DOCX/PDF
+  // (Plan 3), so assert the workspace shell rather than the old HTML replica text.
+  const wsMarkers = "Official form";
+  await sweep("OSAS sf-002 renewal", `/forms/sf-002${sfQ}`, wsMarkers);
+  await sweep("OSAS sf-003 adviser", `/forms/sf-003${sfQ}`, wsMarkers);
+  await sweep("OSAS sf-004 plan", `/forms/sf-004${sfQ}`, wsMarkers);
+  await sweep("OSAS sf-005 roster", `/forms/sf-005${sfQ}`, wsMarkers);
+  await sweep("OSAS sf-006 cert", `/forms/sf-006?org=${sampleOrg.id}`, wsMarkers);
 
   const anon = await fetch(`${BASE}/analytics`, { redirect: "manual" });
   rec("anon /analytics redirected to login", anon.status === 307 || anon.status === 308, `status=${anon.status}`);
@@ -289,11 +333,18 @@ async function main() {
   }
 
   // ---- Signed SF-001 route (seeded demo) renders a verified chain -----------
-  const sfDemo = await prisma.signatureRoute.findFirst({
+  // Past re-seeds replaced organization ids, leaving orphaned routes behind;
+  // only consider a demo whose entityId still resolves to a live organization.
+  const sfDemoCandidates = await prisma.signatureRoute.findMany({
     where: { entityType: "SF", formKey: "SF001", state: "COMPLETED" },
     select: { entityId: true, steps: { where: { status: "SIGNED" }, select: { chainHash: true } } },
   });
-  rec("fixture: SF-001 signature demo route exists", sfDemo != null, sfDemo ? `steps=${sfDemo.steps.length}` : "run `npm run db:seed`");
+  const liveOrgs = new Set((await prisma.organization.findMany({ select: { id: true } })).map((o) => o.id));
+  const sfDemo = sfDemoCandidates.find((r) => {
+    const [, orgId] = r.entityId.split(":");
+    return liveOrgs.has(orgId);
+  });
+  rec("fixture: SF-001 signature demo route exists", sfDemo != null, sfDemo ? `steps=${sfDemo.steps.length}` : "no COMPLETED route for a live org — run `npm run db:seed`");
   if (sfDemo) {
     const [, orgId, ay] = sfDemo.entityId.split(":");
     const { status: s9, text: t9 } = await fetchText(`/forms/sf-001?org=${orgId}&ay=${ay}`, tokens.OSAS);

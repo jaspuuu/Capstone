@@ -33,7 +33,9 @@ const FORM_ROUTES: Record<string, SignatoryRole[]> = {
   SF001: ["PRESIDENT", "SECRETARY", "SENIOR_ADVISER", "DEAN"],
   SF002: ["PRESIDENT", "SENIOR_ADVISER", "DEAN", "SOA", "OSAS"],
   SF003: ["PRESIDENT", "SECRETARY", "SENIOR_ADVISER", "DEAN"],
+  SF004: ["PRESIDENT", "SECRETARY", "SENIOR_ADVISER", "DEAN", "SOA", "OSAS"],
   SF005: ["PRESIDENT", "SECRETARY", "SENIOR_ADVISER"],
+  SF006: ["SENIOR_ADVISER", "DEAN", "OSAS"],
 };
 
 function getCurrentStep(steps: any[]): any | null {

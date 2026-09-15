@@ -4,49 +4,36 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth/guards";
 import {
-  authorizeCurrentSigner,
   ensureRoute,
   getRouteWithSteps,
   resolveSigners,
 } from "@/lib/signature-routing";
+import {
+  authorizeStepForUser,
+  resolveOrgContext,
+  SIGNATORY_SCOPE,
+} from "@/lib/signature-policy";
+import { writeAudit } from "@/lib/audit";
 import {
   hashChainStep,
   signatureContentHash,
   signatureContentPayload,
 } from "@/lib/signature-integrity";
 import { syncFinancialSubmission } from "@/lib/actions/financial";
+import { notifyOrgOfficers, notifyRouteSigners } from "@/lib/notifications";
 
 // ---------------------------------------------------------------------------
 // Signing actions (§10 explicit confirmation, §11 audit trail, §28 backend
-// enforcement). The `confirm` flag must arrive as "yes" — a saved signature
-// is never attached implicitly.
+// enforcement). Every action re-derives the target organization from the
+// routed RECORD and re-runs the centralized policy — an attacker altering the
+// URL, the route id, or any request field cannot widen authorization.
 // ---------------------------------------------------------------------------
 
 export type RouteActionState = { error?: string; ok?: string };
 
-async function orgContextFor(entityType: string, entityId: string) {
-  if (entityType === "FinancialSubmission") {
-    // entityId = FinancialSubmission row id.
-    const sub = await db.financialSubmission.findUnique({
-      where: { id: entityId },
-      select: { organizationId: true, academicYear: true },
-    });
-    if (!sub) throw new Error("Financial submission not found.");
-    const org = await db.organization.findUnique({
-      where: { id: sub.organizationId },
-      select: { id: true, collegeId: true },
-    });
-    if (!org) throw new Error("Organization not found.");
-    return { ...org, academicYear: sub.academicYear };
-  }
-  // entityId = `${formKey}:${orgId}:${ay}`
-  const [, orgId, ay] = entityId.split(":");
-  const org = await db.organization.findUnique({
-    where: { id: orgId },
-    select: { id: true, collegeId: true },
-  });
-  if (!org) throw new Error("Organization not found.");
-  return { ...org, academicYear: ay };
+async function signerName(userId: string) {
+  const u = await db.user.findUnique({ where: { id: userId }, select: { firstName: true, lastName: true } });
+  return u ? `${u.firstName} ${u.lastName}` : null;
 }
 
 export async function signCurrentStep(
@@ -69,18 +56,17 @@ export async function signCurrentStep(
       return { error: "You must opt into attaching your saved signature to this document." };
     }
 
-const route = await db.signatureRoute.findUnique({
+    const route = await db.signatureRoute.findUnique({
       where: { id: routeId },
       select: { id: true, entityType: true, entityId: true, formKey: true, title: true, version: true },
     });
     if (!route) return { error: "Routing record not found." };
 
-    const org = await orgContextFor(route.entityType, route.entityId);
-    const { step } = await authorizeCurrentSigner({
+    // Centralized policy gate — organization is derived from the RECORD.
+    const { step, org } = await authorizeStepForUser({
       entityType: route.entityType,
       entityId: route.entityId,
       userId: user.id,
-      org,
     });
 
     // Snapshot the signature from the live User row (never trust stale session data).
@@ -104,6 +90,8 @@ const route = await db.signatureRoute.findUnique({
         academicYear: org.academicYear,
       })
     );
+
+    let nextInChain: { id: string; role: string } | null = null;
 
     await db.$transaction(async (tx) => {
       // Previous link in the chain (the most recent signed step, if any).
@@ -142,6 +130,7 @@ await tx.signatureStep.update({
         orderBy: { order: "asc" },
       });
       if (next) {
+        nextInChain = next;
         const eligible = await resolveSigners(next.role, org);
         await tx.signatureStep.update({
           where: { id: next.id },
@@ -158,7 +147,50 @@ await tx.signatureRoute.update({
       }
     });
 
+    if (nextInChain) {
+      await notifyRouteSigners(route.id, {
+        type: "SIGNATURE_REQUESTED",
+        category: "SIGNATURE",
+        priority: "ACTION_REQUIRED",
+        title: `Signature required: ${route.title ?? route.formKey}`,
+        body: "The signing chain advanced after your review; a new step now requires your signature.",
+        reason: "You hold the current signatory role for this document. Signing is required to continue the workflow.",
+      });
+    } else {
+      await notifyOrgOfficers(org.id, {
+        type: "SIGNATURE_COMPLETED",
+        category: "APPROVAL",
+        priority: "SUCCESS",
+        title: `All signatures collected: ${route.title ?? route.formKey}`,
+        body: "Every required signatory has approved the document.",
+        entityType: route.entityType,
+        entityId: route.entityId,
+        dedupKey: `SIGNED:${route.id}:${route.version}:COMPLETED`,
+        link: `/forms/${route.formKey.toLowerCase()}`,
+        reason: "This document belongs to your organization and has been fully approved.",
+      }, { academicYear: org.academicYear });
+    }
+
     await syncFinancialSubmission({ entityType: route.entityType, entityId: route.entityId });
+    await writeAudit({
+      userId: user.id,
+      action: "SIGNATURE.SIGNED",
+      entityType: route.entityType,
+      entityId: route.entityId,
+      entityLabel: `${route.title ?? route.formKey} · ${route.formKey}`,
+      newState: {
+        organizationId: org.id,
+        academicYear: org.academicYear,
+        signerName: await signerName(user.id),
+        role: step.role,
+        signatoryScope: SIGNATORY_SCOPE[step.role],
+        documentVersion: route.version,
+        workflowStep: step.order,
+        signatureMethod: signer.signatureMethod ?? null,
+        action: "Approved & Signed",
+        signedAt: signedAt.toISOString(),
+      },
+    });
     revalidatePath(`/forms/${route.formKey.toLowerCase()}`);
     return { ok: "Signature attached and forwarded." };
   } catch (e) {
@@ -177,16 +209,14 @@ export async function returnCurrentStep(
 
     const route = await db.signatureRoute.findUnique({
       where: { id: routeId },
-      select: { id: true, entityType: true, entityId: true, formKey: true },
+      select: { id: true, entityType: true, entityId: true, formKey: true, title: true, version: true },
     });
     if (!route) return { error: "Routing record not found." };
 
-const org = await orgContextFor(route.entityType, route.entityId);
-    const { step } = await authorizeCurrentSigner({
+    const { step, org } = await authorizeStepForUser({
       entityType: route.entityType,
       entityId: route.entityId,
       userId: user.id,
-      org,
     });
 
     await db.$transaction(async (tx) => {
@@ -207,14 +237,41 @@ const org = await orgContextFor(route.entityType, route.entityId);
         where: { routeId: route.id, order: 1 },
       });
       if (first) {
-await tx.signatureStep.update({
+        await tx.signatureStep.update({
           where: { id: first.id },
           data: { status: "CURRENT" },
         });
       }
     });
 
+    await notifyRouteSigners(route.id, {
+      type: "SIGNATURE_RETURNED",
+      category: "REVISION",
+      priority: "ACTION_REQUIRED",
+      title: `Document returned for revision: ${route.title ?? route.formKey}`,
+      body: comment ? `Reason: ${comment.slice(0, 200)}` : "A signatory returned the document with a comment.",
+      dedupKey: `RETURNED:${route.id}:${route.version + 1}`,
+      reason: "A signatory returned this document; it must be corrected and re-signed before the workflow can continue.",
+    });
+
     await syncFinancialSubmission({ entityType: route.entityType, entityId: route.entityId });
+    await writeAudit({
+      userId: user.id,
+      action: "SIGNATURE.RETURNED",
+      entityType: route.entityType,
+      entityId: route.entityId,
+      entityLabel: `${route.title ?? route.formKey} · ${route.formKey}`,
+      newState: {
+        organizationId: org.id,
+        academicYear: org.academicYear,
+        signerName: await signerName(user.id),
+        role: step.role,
+        documentVersion: route.version + 1,
+        workflowStep: step.order,
+        action: "Returned for revision",
+        comment,
+      },
+    });
     revalidatePath(`/forms/${route.formKey.toLowerCase()}`);
     return { ok: "Document returned for revision." };
   } catch (e) {
@@ -236,7 +293,7 @@ export async function resubmitRoute(
     });
     if (!route) return { error: "Routing record not found." };
 
-const org = await orgContextFor(route.entityType, route.entityId);
+    const org = await resolveOrgContext(route.entityType, route.entityId);
     const first = route.steps[0];
     const eligible = await resolveSigners(first.role, org);
     if (!eligible.includes(user.id)) {
@@ -247,6 +304,31 @@ const org = await orgContextFor(route.entityType, route.entityId);
     }
 
     await resetRouteForResubmit(route.id);
+    await notifyRouteSigners(route.id, {
+      type: "SIGNATURE_RESUBMITTED",
+      category: "SIGNATURE",
+      priority: "ACTION_REQUIRED",
+      title: `Re-signed document: ${route.title ?? route.formKey}`,
+      body: "The document was resubmitted after revision; please re-verify and sign before the next step.",
+      dedupKey: `RESUBMITTED:${route.id}:${route.version}`,
+      reason: "The document was corrected and resubmitted; the signing chain restarts at your step.",
+    });
+    await writeAudit({
+      userId: user.id,
+      action: "SIGNATURE.RESUBMITTED",
+      entityType: route.entityType,
+      entityId: route.entityId,
+      entityLabel: `${route.title ?? route.formKey} · ${route.formKey}`,
+      newState: {
+        organizationId: org.id,
+        academicYear: org.academicYear,
+        signerName: await signerName(user.id),
+        role: first.role,
+        documentVersion: route.version,
+        workflowStep: 1,
+        action: "Resubmitted for signatures",
+      },
+    });
 
     await syncFinancialSubmission({ entityType: route.entityType, entityId: route.entityId });
     revalidatePath(`/forms/${route.formKey.toLowerCase()}`);
@@ -305,6 +387,6 @@ export async function loadOrCreateRoute(params: {
   const existing = await getRouteWithSteps(params.entityType, params.entityId);
   if (existing) return existing;
   const user = await requireUser();
-  return ensureRoute({ ...params, creatorId: user.id });
+  return ensureRoute({ ...params, creatorId: user.id, activateFirst: false });
 }
 

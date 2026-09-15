@@ -120,7 +120,7 @@ export function isAdminRole(role: Role): boolean {
 // filter so users can never read outside their scope by editing URLs (§44).
 // ---------------------------------------------------------------------------
 
-export function orgScopeWhere(user: AuthUser): Prisma.OrganizationWhereInput {
+export function orgScopeWhere(user: Pick<AuthUser, "id" | "role" | "collegeId">): Prisma.OrganizationWhereInput {
   switch (user.role) {
     case "OSAS":
     case "SOA":
@@ -141,7 +141,7 @@ export function orgScopeWhere(user: AuthUser): Prisma.OrganizationWhereInput {
 
 /** Combines an arbitrary filter with the user's scope. */
 export function scopedOrgWhere(
-  user: AuthUser,
+  user: Pick<AuthUser, "id" | "role" | "collegeId">,
   filter: Prisma.OrganizationWhereInput = {}
 ): Prisma.OrganizationWhereInput {
   return { AND: [orgScopeWhere(user), filter] };

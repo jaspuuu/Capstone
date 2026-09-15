@@ -1,6 +1,8 @@
 import { requireUser } from "@/lib/auth/guards";
+import { db } from "@/lib/db";
 import {
   authorizeCurrentSigner,
+  describeSignatureStatus,
   ensureRoute,
   getRouteWithSteps,
 } from "@/lib/signature-routing";
@@ -25,12 +27,17 @@ export async function SignatureRouteSection({
   title?: string;
 }) {
   const user = await requireUser();
+  const me = await db.user.findUnique({
+    where: { id: user.id },
+    select: { signatureImage: true, signatureTyped: true },
+  });
+  const hasSavedSignature = Boolean(me?.signatureImage || me?.signatureTyped);
   const entityType = "SF";
   const entityId = sfRouteEntityId(formKey, orgId, ay);
 
   const route =
     (await getRouteWithSteps(entityType, entityId)) ??
-    (await ensureRoute({ entityType, entityId, formKey, title, creatorId: user.id }));
+    (await ensureRoute({ entityType, entityId, formKey, title, creatorId: user.id, activateFirst: false }));
 
   const verification: SignatureChainVerification = verifySignatureChain(
     route.steps.map((s) => ({
@@ -48,16 +55,13 @@ export async function SignatureRouteSection({
 
   let viewerCanSignNow = false;
   try {
-    await authorizeCurrentSigner({
-      entityType,
-      entityId,
-      userId: user.id,
-      org: { id: orgId, academicYear: ay, collegeId: (await getCollegeId(orgId)) ?? "" },
-    });
+    await authorizeCurrentSigner({ entityType, entityId, userId: user.id });
     viewerCanSignNow = true;
   } catch {
     viewerCanSignNow = false;
   }
+
+  const status = await describeSignatureStatus({ userId: user.id, entityType, entityId });
 
   return (
     <SignatureRoutePanel
@@ -79,16 +83,9 @@ export async function SignatureRouteSection({
       }}
       viewerId={user.id}
       viewerCanSignNow={viewerCanSignNow}
+      hasSavedSignature={hasSavedSignature}
       verification={verification}
+      status={status}
     />
   );
-}
-
-async function getCollegeId(orgId: string) {
-  const { db } = await import("@/lib/db");
-  const org = await db.organization.findUnique({
-    where: { id: orgId },
-    select: { collegeId: true },
-  });
-  return org?.collegeId ?? null;
 }

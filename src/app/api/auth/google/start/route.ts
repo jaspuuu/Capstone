@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
+import { isHttpsRequest } from "@/lib/auth/cookie";
 
 /**
  * Starts the Google OAuth flow. Requires GOOGLE_CLIENT_ID and
@@ -35,7 +36,7 @@ export async function GET(request: Request) {
   );
   const cookieOptions = {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: await isHttpsRequest(),
     sameSite: "lax" as const,
     path: "/",
     maxAge: 600,

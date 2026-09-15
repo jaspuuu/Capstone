@@ -130,7 +130,7 @@ export async function buildAnalyticsExport(
       const updatedAt = new Date(rec.updatedAt as unknown as string);
       if (now.getTime() - updatedAt.getTime() > 14 * 86_400_000) {
         stalled.push({
-          entityId: `/recognition/${rec.id}`,
+          entityId: `/organizations/${o.id}/accreditation`,
           orgId: o.id,
           orgName: o.acronym ?? o.name,
           kind: "accreditation application",

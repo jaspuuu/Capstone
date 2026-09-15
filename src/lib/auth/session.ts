@@ -3,6 +3,7 @@ import { cache } from "react";
 import { cookies } from "next/headers";
 import { createHash, randomBytes } from "crypto";
 import type { Role } from "@/generated/prisma/client";
+import { isHttpsRequest } from "@/lib/auth/cookie";
 import { db } from "@/lib/db";
 
 const COOKIE_NAME = process.env.SESSION_COOKIE_NAME || "organize_session";
@@ -44,9 +45,10 @@ export async function createSession(
   });
 
   const store = await cookies();
+  const secure = await isHttpsRequest();
   store.set(COOKIE_NAME, token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure,
     sameSite: "lax",
     path: "/",
     expires: expiresAt,

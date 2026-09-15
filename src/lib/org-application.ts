@@ -2,7 +2,15 @@
 // from the data the schema actually stores — the SF-001 document checklist
 // lives on the Recognition record (§5) — so the President, reviewers, and OSAS
 // all read the same checklist and SUBMIT enforces the required items.
-export type OrgAppRequirementKey = "SENIOR_ADVISER" | "PRESIDENT" | "SECRETARY" | "PROFILE";
+export type OrgAppRequirementKey =
+  | "SENIOR_ADVISER"
+  | "PRESIDENT"
+  | "SECRETARY"
+  | "PROFILE"
+  | "MINIMUM_MEMBERS";
+
+/** §4/§8: minimum founding members for a new organization recognition. */
+export const MIN_FOUNDING_MEMBERS = 15;
 
 export type OrgAppRequirementItem = {
   key: OrgAppRequirementKey;
@@ -19,6 +27,7 @@ export type OrgAppRequirementsInput = {
   hasSeniorAdviser: boolean;
   hasPresident: boolean;
   hasSecretary: boolean;
+  activeMemberCount: number;
 };
 
 export function orgAppRequirements(input: OrgAppRequirementsInput): OrgAppRequirementItem[] {
@@ -45,6 +54,14 @@ export function orgAppRequirements(input: OrgAppRequirementsInput): OrgAppRequir
       title: "Secretary seated for the current year",
       hint: "A Secretary of record for the current academic year is required.",
       met: input.hasSecretary,
+      enforced: true,
+    },
+    {
+      key: "MINIMUM_MEMBERS",
+      label: "Founding Members",
+      title: `Minimum ${MIN_FOUNDING_MEMBERS} founding members`,
+      hint: `At least ${MIN_FOUNDING_MEMBERS} active founding members are required for recognition.`,
+      met: input.activeMemberCount >= MIN_FOUNDING_MEMBERS,
       enforced: true,
     },
     {

@@ -17,6 +17,8 @@ import {
   complianceDelta,
   compliancePct,
   dataQualityChecks,
+  diagnoseRepeatedRevisions,
+  diagnoseRevisionReasons,
   diagnoseWorkflow,
   evaluateStats,
   financialAlerts,
@@ -38,9 +40,11 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { StatCard } from "@/components/ui/stat-card";
 import { Badge } from "@/components/ui/badge";
-import { ExportAnalyticsLink, NoData } from "@/components/analytics/analytics-parts";
+import { AnalyticsFolio, ExportAnalyticsLink, NoData, type FolioItem } from "@/components/analytics/analytics-parts";
 import { AnalyticsFilters } from "@/components/analytics/analytics-filters";
 import { AnalyticsDashboard } from "@/components/analytics/dashboard";
+import type { AnalyticsView } from "@/components/analytics/dashboard/views";
+import { isAnalyticsView } from "@/components/analytics/dashboard/views";
 import type { MatrixRow, MatrixTone } from "@/components/analytics/matrix-table";
 export const instant = false;
 
@@ -61,6 +65,8 @@ export default async function AnalyticsPage({
   const now = new Date();
   const ay = toStr(sp.ay) || currentAcademicYear();
   const full = can(user, "analytics.view");
+  const rawView = toStr(sp.view);
+  const view: AnalyticsView = isAnalyticsView(rawView) ? rawView : "overview";
 
   // ---- Personal branch (MEMBER): their own activities, attendance, memberships.
   if (user.role === "MEMBER") {
@@ -273,7 +279,7 @@ export default async function AnalyticsPage({
       const updatedAt = new Date(rec.updatedAt as unknown as string);
       if (now.getTime() - updatedAt.getTime() > 14 * 86_400_000) {
         stalled.push({
-          entityId: `/recognition/${rec.id}`,
+          entityId: `/organizations/${o.id}/accreditation`,
           orgId: o.id,
           orgName: o.acronym ?? o.name,
           kind: "accreditation application",
@@ -344,6 +350,9 @@ export default async function AnalyticsPage({
 
   // ---- Diagnostic panels ----------------------------------------------------------
   const workflowDelays = diagnoseWorkflow(events);
+  const revisionReasons = diagnoseRevisionReasons(events);
+  const revisionTotal = revisionReasons.reduce((s, r) => s + r.count, 0);
+  const repeatedRevisionCount = diagnoseRepeatedRevisions(events).length;
   const activeOrgCount = Math.max(1, orgsScoped.filter((o) => o.status === "ACTIVE").length);
   const missed = [...checklistByOrg.entries()].flatMap(([, items]) => items.filter((i) => !i.met));
   const missedByKey = new Map<string, number>();
@@ -369,17 +378,33 @@ export default async function AnalyticsPage({
     if (v) exportParams.set(k, v);
   }
 
+  const atRiskCount = alerts.filter((a) => a.priority === "CRITICAL").length;
+  const stalledCount = alerts.filter((a) => a.kind === "STALLED_WORKFLOW").length;
+  // The folio's attention strip: the exceptions, not the balance — the KPI
+  // cards below carry the balanced view.
+  const attentionStrip: FolioItem[] = [
+    { value: `${atRiskCount}`, label: "At risk", accent: atRiskCount > 0 },
+    { value: `${finCounts.OVERDUE}`, label: "Financial overdue", accent: finCounts.OVERDUE > 0 },
+    {
+      value: `${monitored.reduce((s, m) => s + m.endedWithoutReport.length, 0)}`,
+      label: "Ended without report",
+    },
+    { value: `${stalledCount}`, label: "Stalled workflows", accent: stalledCount > 0 },
+  ];
+
   return (
     <>
-      <PageHeader
-        title="Analytics"
+      <AnalyticsFolio
+        rubric="Office of Student Affairs & Services"
+        title="Register of organizations"
         description={
           full
-            ? `Five-layer compliance monitoring — descriptive, diagnostic, trend, rule-based alerts, rule-based recommendations · AY ${ay}`
+            ? `Six register views — overview, compliance, trends, activities, alerts, data quality · AY ${ay}`
             : `Your scope: compliance monitoring for the organizations you can access · AY ${ay}`
         }
-        breadcrumb={[{ label: "Analytics" }]}
-        actions={full ? <ExportAnalyticsLink params={exportParams.toString()} /> : undefined}
+        action={full ? <ExportAnalyticsLink params={exportParams.toString()} /> : undefined}
+        items={attentionStrip}
+        ay={ay}
       />
 
       <AnalyticsFilters
@@ -401,6 +426,7 @@ export default async function AnalyticsPage({
       ) : (
         <>
           <AnalyticsDashboard
+            view={view}
             kpis={{
               orgsCount: orgsScoped.length,
               recognized: recognizedCount,
@@ -411,7 +437,7 @@ export default async function AnalyticsPage({
               avgCompliance,
               compDelta,
               activeScoreCount: activeScores.length,
-              compTrend,
+              topMissed: missedRows.slice(0, 3),
               finCounts,
               monitored,
             }}
@@ -422,6 +448,9 @@ export default async function AnalyticsPage({
               workflowDelays,
               full,
               bottleneckList,
+              revisionReasons,
+              revisionTotal,
+              repeatedRevisionCount,
             }}
             trends={{ compTrend, compDelta, trends }}
             monitoring={{

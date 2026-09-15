@@ -1,10 +1,12 @@
 "use client";
 
 import { useActionState, useState } from "react";
+import Link from "next/link";
 import {
   CheckCircle2,
   CircleDashed,
   Lock,
+  PenLine,
   RotateCcw,
   ShieldCheck,
   ShieldX,
@@ -20,6 +22,7 @@ import {
   type RouteActionState,
 } from "@/lib/actions/signature-route";
 import type { SignatureChainVerification } from "@/lib/signature-integrity";
+import type { SignatureStatusDetail } from "@/lib/signature-routing";
 
 // ---------------------------------------------------------------------------
 // Document workflow tracker (§7, §27). Shows exactly where a document is:
@@ -62,14 +65,21 @@ function fmt(d: Date) {
 export function SignatureRoutePanel({
   route,
   viewerCanSignNow,
+  hasSavedSignature,
   verification,
+  status,
 }: {
   route: RouteView;
   viewerId: string;
   /** Server already verified the viewer is the awaited signatory. */
   viewerCanSignNow: boolean;
+  /** Whether the viewer has saved an image/typed signature in My Signature. */
+  hasSavedSignature?: boolean;
   /** Recomputed hash-chain result for the route's signed steps (server-side). */
   verification?: SignatureChainVerification;
+  /** Server-side eligibility detail — explains WHO is awaited and WHY the
+   * viewer can or cannot sign (§13). Never a client-side guess. */
+  status?: SignatureStatusDetail;
 }) {
   const [signState, signAction] = useActionState(signCurrentStep, EMPTY);
   const [returnState, returnAction] = useActionState(returnCurrentStep, EMPTY);
@@ -81,6 +91,9 @@ export function SignatureRoutePanel({
 
   const current = route.steps.find((s) => s.status === "CURRENT");
   const done = route.state === "COMPLETED";
+  const signedCount = route.steps.filter((s) => s.status === "SIGNED").length;
+  const requiredCount = route.steps.length;
+  const sigPct = requiredCount > 0 ? Math.round((signedCount / requiredCount) * 100) : 0;
 
   return (
     <div className="rounded-xl border border-line bg-surface p-5">
@@ -100,30 +113,73 @@ export function SignatureRoutePanel({
         </span>
       </div>
 
-      {/* Tracker */}
+      {/* Signature progress — counts only the REQUIRED signatories configured
+          for this specific form (workflow config, not a universal chain). */}
+      {requiredCount > 0 && (
+        <div
+          className={`mt-4 rounded-lg border px-3 py-2.5 ${
+            done ? "border-emerald-200 bg-emerald-50" : "border-line bg-surface-secondary"
+          }`}
+        >
+          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+            <p className={`text-xs font-bold ${done ? "text-emerald-800" : "text-content"}`}>
+              {done
+                ? `All ${requiredCount} required signatures complete — approved`
+                : `Signature progress — ${signedCount} of ${requiredCount} required signatures completed`}
+            </p>
+            <span
+              className={`text-[10px] font-bold tabular-nums ${
+                done ? "text-emerald-700" : "text-content-muted"
+              }`}
+            >
+              {sigPct}%
+            </span>
+          </div>
+          <div
+            aria-hidden
+            className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-line-strong"
+          >
+            <span
+              className={`block h-full rounded-full ${
+                done ? "bg-emerald-500" : "bg-blue-500"
+              }`}
+              style={{ width: `${sigPct}%` }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* History timeline (§17): each step shows who, what position, what
+          action, and when — the same record auditors see. */}
       <ol className="mt-4 space-y-1.5">
         {route.steps.map((s, i) => {
           const { icon: Icon, cls } = STEP_STYLE[s.status];
+          const roleLabel = SIGNATORY_LABELS[s.role];
           return (
             <li key={s.id} className="flex items-start gap-2.5">
               <Icon className={`mt-0.5 size-4 shrink-0 ${cls}`} aria-hidden />
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium text-content">
-                  {s.order}. {SIGNATORY_LABELS[s.role]}
+                  {s.order}. {roleLabel}
                   {s.status === "CURRENT" && (
                     <span className="ml-2 rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-blue-700">
                       Current
                     </span>
                   )}
                 </p>
-                {s.signerName && (
-                  <p className="text-xs text-content-secondary">{s.signerName}</p>
-                )}
+                <p className="text-xs text-content-secondary">
+                  {s.status === "SIGNED"
+                    ? `Signed by ${s.signerName ?? "the authorized signatory"} · ${s.signedAt ? fmt(s.signedAt) : ""}`
+                    : s.status === "CURRENT"
+                      ? `Awaiting signature${s.signerName ? ` from ${s.signerName}` : ""}`
+                      : s.status === "RETURNED"
+                        ? `Returned for revision${s.signedAt ? ` · ${fmt(s.signedAt)}` : ""}`
+                        : s.status === "REJECTED"
+                          ? "Rejected"
+                          : "Locked — awaiting earlier signatories"}
+                </p>
                 {s.status === "SIGNED" && s.signedAt && (
-                  <p className="text-xs text-emerald-700">Signed {fmt(s.signedAt)}</p>
-                )}
-                {s.status === "LOCKED" && (
-                  <p className="text-xs text-content-muted">Locked — awaiting earlier signatories</p>
+                  <p className="text-[11px] text-content-muted">Action: signed and forwarded</p>
                 )}
                 {s.comment && (
                   <p className="mt-0.5 rounded-md bg-orange-50 px-2 py-1 text-xs text-orange-800">
@@ -138,6 +194,34 @@ export function SignatureRoutePanel({
           );
         })}
       </ol>
+
+      {/* Signature eligibility (§13) — the server decides; this only explains */}
+      {!done && (
+        <div
+          className={`mt-4 rounded-lg border px-3 py-2.5 ${
+            viewerCanSignNow && current
+              ? "border-emerald-200 bg-emerald-50"
+              : route.state === "RETURNED_FOR_REVISION"
+                ? "border-warning/30 bg-warning/10"
+                : "border-line bg-surface-secondary"
+          }`}
+        >
+          <p
+            className={`text-xs font-bold ${
+              viewerCanSignNow && current ? "text-emerald-800" : "text-content"
+            }`}
+          >
+            {viewerCanSignNow && current
+              ? `You are the authorized signatory for this step (${SIGNATORY_LABELS[current.role]}).`
+              : status?.requiredRole
+                ? `This document is waiting for the authorized ${status.requiredRole}.`
+                : "This document is not awaiting any signature right now."}
+          </p>
+          <p className="mt-0.5 text-[11px] leading-snug text-content-secondary">
+            {status?.detail ?? "No signatures are currently being accepted for this document."}
+          </p>
+        </div>
+      )}
 
       {/* Signature-chain integrity */}
       {verification && verification.total > 0 && (
@@ -225,17 +309,30 @@ export function SignatureRoutePanel({
               </label>
 
               {/* Step 2: Opt into attaching the saved signature */}
-              <label className="flex items-start gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={useSavedSig}
-                  onChange={(e) => setUseSavedSig(e.target.checked)}
-                  className="mt-0.5 size-4 rounded border-line-strong text-primary focus:ring-primary/20"
-                />
-                <span className="text-sm text-content">
-                  Attach my saved signature to this document
-                </span>
-              </label>
+              {hasSavedSignature ? (
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={useSavedSig}
+                    onChange={(e) => setUseSavedSig(e.target.checked)}
+                    className="mt-0.5 size-4 rounded border-line-strong text-primary focus:ring-primary/20"
+                  />
+                  <span className="text-sm text-content">
+                    Attach my saved signature to this document
+                  </span>
+                </label>
+              ) : (
+                <div className="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2.5">
+                  <PenLine className="mt-0.5 size-4 shrink-0 text-warning" aria-hidden />
+                  <p className="text-xs leading-snug text-content-secondary">
+                    You haven’t saved a signature yet.{" "}
+                    <Link href="/profile/signature" className="font-semibold text-primary hover:underline">
+                      Set it in My Signature
+                    </Link>{" "}
+                    — it will be attached here when you confirm.
+                  </p>
+                </div>
+              )}
 
               <div className="flex gap-2">
                 <button
@@ -253,6 +350,11 @@ export function SignatureRoutePanel({
                   Cancel
                 </button>
               </div>
+              {(!reviewed || !useSavedSig) && (
+                <p className="text-xs text-content-muted">
+                  Tick both confirmation boxes above to enable Confirm &amp; Sign.
+                </p>
+              )}
             </form>
           )}
           {!returning ? (

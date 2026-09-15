@@ -27,6 +27,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { TableWrap, THead, TH, TR, TD } from "@/components/ui/table";
 import { ActionForm, QuickActionForm } from "@/components/action-form";
 import { deleteAttachment, updateAttachmentKind, uploadAttachment } from "@/lib/actions/attachments";
+import { OrgWorkspaceNav } from "@/components/org-workspace-nav";
 export const instant = false;
 
 export const metadata: Metadata = { title: "Document repository" };
@@ -55,6 +56,8 @@ export default async function OrganizationDocumentsPage({
   searchParams: Promise<{ ay?: string }>;
 }) {
   const user = await requireUser();
+  // Forms repository — internal; plain members cannot view it.
+  if (user.role === "MEMBER") notFound();
   const { id } = await params;
   const sp = await searchParams;
 
@@ -174,7 +177,7 @@ export default async function OrganizationDocumentsPage({
           </div>
           <p className="mt-1 text-sm text-content-secondary">
             Accreditation documents for <span className="font-semibold">{org.name}</span>, tracked
-            against the seven SF-001 requirements.
+            against the eight SF-001 requirements.
           </p>
         </div>
 
@@ -196,6 +199,8 @@ export default async function OrganizationDocumentsPage({
           ))}
         </nav>
       </div>
+
+      <OrgWorkspaceNav orgId={org.id} active="documents" />
 
       {!primary && (
         <Card className="mb-6 border-dashed">
@@ -226,7 +231,7 @@ export default async function OrganizationDocumentsPage({
           <CardHeader
             icon={CheckCircle2}
             title={`SF-001 requirements · AY ${ay}`}
-            description="Each document follows its application: Required → Submitted → Under Review → Approved (or Returned)."
+            description="Each document follows its application: Uploaded → Submitted → Under Review → Approved (or Returned)."
           />
           <div className="flex flex-wrap items-center gap-2 border-b border-line px-5 py-2.5">
             {Object.entries(REQUIREMENT_STATUS_META).map(([k, m]) => (

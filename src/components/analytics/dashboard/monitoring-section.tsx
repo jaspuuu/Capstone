@@ -63,7 +63,7 @@ export function AnalyticsMonitoring(p: AnalyticsMonitoringProps) {
                 />
               </div>
               {p.realEval.count > 0 ? (
-                <div className="mt-4 space-y-3">
+                <div className="mt-4">
                   {p.realEval.dims.map((d) => (
                     <ArcRail key={d.label} label={d.label} avg={d.avg} pct={d.pct} />
                   ))}
@@ -97,7 +97,7 @@ export function AnalyticsMonitoring(p: AnalyticsMonitoringProps) {
                 <StatCard label="Pending" value={p.meStats.pending} icon={Activity} iconTone="info" hint="no outcome recorded yet" />
               </div>
               {p.meStats.total > 0 && (
-                <div className="rounded-xl border border-line px-4 py-3">
+                <div className="mt-4 border-t border-line pt-3">
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-sm font-semibold text-content">Implementation rate</p>
                     <span className="text-lg font-bold tabular-nums text-success">
@@ -105,7 +105,7 @@ export function AnalyticsMonitoring(p: AnalyticsMonitoringProps) {
                     </span>
                   </div>
                   <div
-                    className="mt-2 h-2 overflow-hidden rounded-full bg-surface-secondary"
+                    className="mt-2 h-1.5 overflow-hidden rounded-full bg-surface-secondary"
                     role="meter"
                     aria-valuenow={Math.round((p.meStats.implemented / p.meStats.total) * 100)}
                     aria-valuemin={0}
@@ -134,7 +134,7 @@ function BudgetUtilizationBar({ monitored }: { monitored: OrgMonitoring[] }) {
   const actual = monitored.reduce((s, m) => s + m.budgetActual, 0);
   const util = budgetUtilizationPct(planned, actual);
   return (
-    <div className="mt-4 flex items-center justify-between gap-2 rounded-xl border border-line px-4 py-3">
+    <div className="mt-3 flex items-center justify-between gap-2 border-t border-line pt-3">
       <div>
         <p className="text-sm font-semibold text-content">Budget utilization</p>
         <p className="text-xs text-content-secondary">
@@ -144,7 +144,7 @@ function BudgetUtilizationBar({ monitored }: { monitored: OrgMonitoring[] }) {
       <div className="flex items-center gap-2">
         {util != null && (
           <div
-            className="h-2 w-36 overflow-hidden rounded-full bg-surface-secondary"
+            className="h-1.5 w-32 overflow-hidden rounded-full bg-surface-secondary"
             role="meter"
             aria-valuenow={Math.round(util)}
             aria-valuemin={0}
@@ -180,7 +180,7 @@ function ArcRail({
   pct: number;
 }) {
   return (
-    <div className="rounded-lg border border-line px-3 py-2">
+    <div className="border-b border-line py-3 first:pt-0 last:pb-0 last:border-0">
       <div className="flex items-baseline justify-between gap-2 text-xs">
         <span className="font-medium text-content">{label}</span>
         <span className="shrink-0 font-semibold tabular-nums text-content">avg {avg}/5</span>

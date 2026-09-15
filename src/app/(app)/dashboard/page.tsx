@@ -3,27 +3,33 @@ import Link from "next/link";
 import {
   ArrowRight,
   Award,
+  CalendarCheck,
   CalendarClock,
+  CalendarDays,
   ClipboardCheck,
   FileSignature,
   Landmark,
   RefreshCw,
+  UserPlus,
 } from "lucide-react";
 import { requireUser } from "@/lib/auth/guards";
 import { isAdminRole } from "@/lib/auth/rbac";
+import { isOfficerPosition } from "@/lib/auth/positions";
 import type { Role } from "@/generated/prisma/client";
 import { db } from "@/lib/db";
 import { getSelectedAy } from "@/lib/ay-server";
-import { formatDate, formatDateTime, fullName, timeUntil } from "@/lib/utils";
+import { getSelectedOrgId } from "@/lib/org-server";
+import { formatDate, formatDateTime, fullName, timeAgo, timeUntil } from "@/lib/utils";
 import {
   AUDIT_ACTION_LABELS,
+  ATTENDANCE_STATUS_META,
   DEADLINE_PROCESS_LABELS,
   MEMBER_POSITION_LABELS,
+  MEMBERSHIP_STATUS_META,
   ORG_APPLICATION_STATUS_META,
   ORG_STATE_META,
   PROPOSAL_STATUS_META,
   RECOGNITION_STATUS_META,
-  SHORT_ROLE_LABELS,
   type BadgeTone,
 } from "@/lib/constants";
 import { deadlineStatus, listActiveDeadlines } from "@/lib/deadlines";
@@ -43,6 +49,13 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { DashboardBriefing } from "@/components/dashboard-briefing";
 import { Timeline, type TimelineItem } from "@/components/ui/timeline";
 import { TableWrap, THead, TH, TR, TD } from "@/components/ui/table";
+import { SignatureQueueCard } from "@/components/forms/signature-queue-card";
+import { getSignatureQueue } from "@/lib/signature-queue";
+import { getMyTasks } from "@/lib/tasks";
+import { OfficerActionRequired, type ActionItem } from "@/components/dashboard/officer-action-required";
+import { OfficerStatusSummary, type StatusCell } from "@/components/dashboard/officer-status-summary";
+import { OfficerContext, type OfficerContextMembership } from "@/components/dashboard/officer-context";
+import { orgAppCompliancePct, orgAppRequirements } from "@/lib/org-application";
 export const instant = false;
 
 export const metadata: Metadata = { title: "Dashboard" };
@@ -56,6 +69,9 @@ export default async function DashboardPage() {
   if (user.role === "ADVISER_REGULAR" || user.role === "ADVISER_PARTTIME") {
     return <AdviserDashboard user={user} ay={ay} />;
   }
+  // Plain members get the self-service participant surface — officers
+  // (President/Secretary memberships) keep the officer workspace below.
+  if (user.role === "MEMBER") return <MemberDashboard user={user} ay={ay} />;
   return <OfficerDashboard user={user} ay={ay} />;
 }
 
@@ -116,7 +132,7 @@ async function AdminDashboard({
   user: { id: string; firstName: string; role: string };
   ay: string;
 }) {
-  const [orgs, recognitions, deadlines, recentLogs] = await Promise.all([
+  const [orgs, recognitions, deadlines, recentLogs, followUps] = await Promise.all([
     db.organization.findMany({
       where: { archivedAt: null },
       select: {
@@ -140,6 +156,20 @@ async function AdminDashboard({
       orderBy: { createdAt: "desc" },
       include: { user: { select: { firstName: true, lastName: true } } },
     }),
+    db.recognitionFollowUp.findMany({
+      where: { status: { in: ["PENDING", "CONTACTED", "OVERDUE"] } },
+      include: {
+        recognition: {
+          select: {
+            id: true,
+            academicYear: true,
+            organization: { select: { id: true, name: true, acronym: true } },
+          },
+        },
+      },
+      orderBy: { expectedDate: "asc" },
+      take: 6,
+    }),
   ]);
 
   const states = orgs.map((o) => deriveOrgState(o, o.recognitions));
@@ -149,7 +179,7 @@ async function AdminDashboard({
   // much the reviewer's queue as recognition — surface both to OSAS. Applied
   // memberships are officer-reviewed per org, but OSAS needs campus sight of
   // the acceptance queue (read-only; officers act on their org pages).
-  const [pendingQueue, orgApplications, memberApplications] = await Promise.all([
+  const [pendingQueue, orgApplications, memberApplications, signatureQueue] = await Promise.all([
     db.recognition.findMany({
       where: { academicYear: ay, status: { in: inFlightStatuses(RECOGNITION_WORKFLOW) } },
       include: {
@@ -186,6 +216,7 @@ async function AdminDashboard({
       orderBy: { joinedAt: "asc" },
       take: 6,
     }),
+    getSignatureQueue({ role: user.role as Role, id: user.id }, { ay }),
   ]);
 
   const recognizedCount = countStates("RECOGNIZED");
@@ -224,7 +255,7 @@ async function AdminDashboard({
         <StatCard label="Organizations" value={orgs.length} icon={Landmark} hint={`${countStates("INACTIVE")} inactive`} href="/organizations" />
         <StatCard label="Recognized" value={recognizedCount} icon={Award} iconTone="gold" hint={`AY ${ay}`} />
         <StatCard label="Pending reviews" value={pendingCount} icon={ClipboardCheck} iconTone="warning" hint="Applications awaiting action" href="/recognition" />
-        <StatCard label="Active deadlines" value={deadlines.filter((d) => deadlineStatus(d) !== "CLOSED").length} icon={CalendarClock} iconTone="info" href="/deadlines" />
+        <StatCard label="Follow-ups due" value={followUps.length} icon={CalendarClock} iconTone={followUps.length > 0 ? "orange" : "info"} hint="One week after submission" href="/recognition" />
       </div>
 
       <div className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-3">
@@ -310,7 +341,7 @@ async function AdminDashboard({
                       {pendingQueue.map((r) => (
                         <TR key={r.id}>
                           <TD>
-                            <Link href={`/recognition/${r.id}`} className="font-semibold text-primary hover:underline">
+                            <Link href={`/organizations/${r.organization.id}/accreditation`} className="font-semibold text-primary hover:underline">
                               {r.organization.acronym ?? r.organization.name}
                             </Link>
                             <span className="block text-xs text-content-secondary">{r.organization.name}</span>
@@ -325,7 +356,7 @@ async function AdminDashboard({
                             {formatDateTime(r.submittedAt)}
                           </TD>
                           <TD>
-                            <Link href={`/recognition/${r.id}`} className="text-xs font-semibold text-primary hover:underline">
+                            <Link href={`/organizations/${r.organization.id}/accreditation`} className="text-xs font-semibold text-primary hover:underline">
                               Review
                             </Link>
                           </TD>
@@ -372,6 +403,51 @@ async function AdminDashboard({
                           </TD>
                         </TR>
                       ))}
+                    </tbody>
+                  </TableWrap>
+                </section>
+              )}
+              {followUps.length > 0 && (
+                <section aria-label="Follow-ups due" className="border-t border-line">
+                  <p className="px-5 pt-3 pb-1 text-[11px] font-bold uppercase tracking-wider text-content-secondary">
+                    Follow-ups due (one week after submission)
+                  </p>
+                  <TableWrap>
+                    <THead>
+                      <TH>Organization</TH>
+                      <TH>Cycle</TH>
+                      <TH>Expected</TH>
+                      <TH>Status</TH>
+                      <TH />
+                    </THead>
+                    <tbody>
+                      {followUps.map((f) => {
+                        const overdue = new Date() > f.expectedDate;
+                        return (
+                          <TR key={f.id}>
+                            <TD>
+                              <Link href={`/organizations/${f.recognition.organization.id}/accreditation`} className="font-semibold text-primary hover:underline">
+                                {f.recognition.organization.acronym ?? f.recognition.organization.name}
+                              </Link>
+                            </TD>
+                            <TD className="text-xs text-content-secondary">AY {f.recognition.academicYear}</TD>
+                            <TD className="text-xs whitespace-nowrap text-content-secondary">
+                              {formatDate(f.expectedDate)}
+                              {overdue && <span className="ml-1.5 font-bold text-danger">overdue</span>}
+                            </TD>
+                            <TD>
+                              <Badge tone={overdue ? "danger" : "warning"}>
+                                {overdue ? "Overdue" : "Due"}
+                              </Badge>
+                            </TD>
+                            <TD>
+                              <Link href={`/organizations/${f.recognition.organization.id}/accreditation`} className="text-xs font-semibold text-primary hover:underline">
+                                Follow up
+                              </Link>
+                            </TD>
+                          </TR>
+                        );
+                      })}
                     </tbody>
                   </TableWrap>
                 </section>
@@ -426,6 +502,8 @@ async function AdminDashboard({
             />
             <DeadlineList deadlines={deadlines} emptyText="No active deadlines published." />
           </Card>
+
+          <SignatureQueueCard items={signatureQueue} compact />
         </div>
       </div>
 
@@ -485,7 +563,7 @@ async function DeanDashboard({ user, ay }: { user: { id: string; collegeId: stri
               {pending.map((r) => (
                 <li key={r.id} className="flex items-center justify-between gap-3 px-5 py-3.5">
                   <div className="min-w-0">
-                    <Link href={`/recognition/${r.id}`} className="truncate text-sm font-semibold text-primary hover:underline">
+                    <Link href={`/organizations/${r.organization.id}/accreditation`} className="truncate text-sm font-semibold text-primary hover:underline">
                       {r.organization.name}
                     </Link>
                     <p className="text-xs text-content-secondary">{r.kind === "RENEWAL" ? "Renewal" : "Initial application"} · AY {r.academicYear}</p>
@@ -581,7 +659,7 @@ async function AdviserDashboard({ user, ay }: { user: { id: string; firstName: s
     const gate = currentAction(RECOGNITION_WORKFLOW, r.status);
     pendingItems.push({
       id: r.id,
-      href: `/recognition/${r.id}`,
+      href: `/organizations/${r.organization.id}/accreditation`,
       orgHref: `/organizations/${r.organization.id}`,
       orgAcronym: r.organization.acronym ?? r.organization.name,
       orgName: r.organization.name,
@@ -744,9 +822,9 @@ async function AdviserDashboard({ user, ay }: { user: { id: string; firstName: s
   );
 }
 
-async function OfficerDashboard({ user, ay }: { user: { id: string; firstName: string; role: string }; ay: string }) {
+async function OfficerDashboard({ user, ay }: { user: { id: string; firstName: string; role: string; collegeId: string | null }; ay: string }) {
   const memberships = await db.organizationMember.findMany({
-    where: { userId: user.id, isCurrent: true },
+    where: { userId: user.id, isCurrent: true, academicYear: ay },
     include: {
       organization: {
         select: {
@@ -761,129 +839,545 @@ async function OfficerDashboard({ user, ay }: { user: { id: string; firstName: s
     },
   });
 
-  const isOfficer = user.role === "PRESIDENT" || user.role === "SECRETARY";
-  const deadlines = await listActiveDeadlines();
+  // Officer orgs first: the workspace centers on organizations this user
+  // cycles. Every officer seat (incl. org-specific OTHER) counts.
+  const officerMemberships = memberships.filter(
+    (m) => isOfficerPosition(m.position) || m.position === "OTHER"
+  );
+  // A topbar organization selection overrides the default workspace — the
+  // dashboard (status, tasks, deadlines, activity) scopes to it.
+  const selectedOrgId = await getSelectedOrgId();
+  const workspaceScoped = selectedOrgId !== null && memberships.some((m) => m.organizationId === selectedOrgId);
+  const primary = workspaceScoped
+    ? memberships.find((m) => m.organizationId === selectedOrgId)!
+    : officerMemberships[0];
+
+  // Plain members (no officer seat) see a straightforward membership list.
+  if (officerMemberships.length === 0) {
+    return (
+      <>
+        <DashboardBriefing
+          title={`${greeting()}, ${user.firstName}`}
+          description="Your organization and participation."
+          rubric={`Member briefing · AY ${ay}`}
+        />
+        {memberships.length === 0 ? (
+          <EmptyState
+            title="No organization membership"
+            description="You are not currently listed in any student organization. Reach out to your organization officers or the OSAS office."
+          />
+        ) : (
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {memberships.map((m) => {
+              const org = m.organization;
+              const state = deriveOrgState(org, org.recognitions);
+              return (
+                <Card key={m.id}>
+                  <CardHeader icon={Landmark} title={org.name} description={`${MEMBER_POSITION_LABELS[m.position] ?? "Member"} · ${org.college.code}`} />
+                  <CardContent className="flex items-center justify-between gap-3">
+                    <Badge tone={ORG_STATE_META[state].tone}>{ORG_STATE_META[state].label}</Badge>
+                    <Link
+                      href={`/organizations/${org.id}`}
+                      className="inline-flex h-8 items-center gap-1 rounded-lg border border-line-strong px-3 text-xs font-semibold text-content hover:border-primary hover:text-primary"
+                    >
+                      Open <ArrowRight className="size-3.5" aria-hidden />
+                    </Link>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+        )}
+      </>
+    );
+  }
+
+  // ---- Officer work queue for the primary organization ----
+  const workOrg = primary.organization;
+  const workState = deriveOrgState(workOrg, workOrg.recognitions);
+  const currentRec = workOrg.recognitions.find((r) => r.academicYear === ay);
+  const myTasks = await getMyTasks(
+    { id: user.id, role: user.role as Role, collegeId: user.collegeId },
+    { orgId: workspaceScoped ? selectedOrgId! : undefined }
+  );
+
+  const [primaryDetail, activities, recentLogs, deadlines, appliedMembers] = await Promise.all([
+    db.organization.findUnique({
+      where: { id: workOrg.id },
+      select: {
+        description: true,
+        advisers: {
+          where: { isCurrent: true },
+          select: {
+            type: true,
+            academicYear: true,
+            adviser: {
+              select: { id: true, firstName: true, lastName: true, email: true, positionTitle: true },
+            },
+          },
+        },
+        members: { where: { isCurrent: true }, select: { academicYear: true, position: true } },
+      },
+    }),
+    db.activityProposal.findMany({
+      where: { organizationId: workOrg.id },
+      select: { id: true, title: true, status: true, startAt: true },
+    }),
+    db.auditLog.findMany({
+      where: { newState: { path: ["orgId"], string_contains: workOrg.id } },
+      take: 6,
+      orderBy: { createdAt: "desc" },
+      include: { user: { select: { firstName: true, lastName: true } } },
+    }),
+    listActiveDeadlines(),
+    db.organizationMember.findMany({
+      where: { organizationId: workOrg.id, academicYear: ay, status: "APPLIED" },
+      select: {
+        id: true,
+        joinedAt: true,
+        user: { select: { firstName: true, lastName: true, email: true } },
+      },
+      orderBy: { joinedAt: "asc" },
+      take: 5,
+    }),
+  ]);
+
+  const activeAdvisers = primaryDetail?.advisers ?? [];
+  const activeMembers = primaryDetail?.members ?? [];
+  const memberCount = activeMembers.filter((m) => m.academicYear === ay).length;
+  const pendingApprovals = appliedMembers.length;
+  const requirementItems = orgAppRequirements({
+    name: workOrg.name,
+    description: primaryDetail?.description ?? null,
+    hasSeniorAdviser: activeAdvisers.some((a) => a.type === "REGULAR" && a.academicYear === ay),
+    hasPresident: activeMembers.some((m) => m.position === "PRESIDENT" && m.academicYear === ay),
+    hasSecretary: activeMembers.some((m) => m.position === "SECRETARY" && m.academicYear === ay),
+    activeMemberCount: memberCount,
+  });
+  const reqMet = requirementItems.filter((i) => i.met).length;
+  const reqPct = orgAppCompliancePct(requirementItems);
+  const unmet = requirementItems.filter((i) => !i.met);
+  const isOfficerHere = primary.position === "PRESIDENT" || primary.position === "SECRETARY";
+
+  // ---- ACTION REQUIRED — assembled server-side, only what needs THIS user ----
+  const actionItems: ActionItem[] = [];
+  for (const t of myTasks) {
+    if (t.type === "SIGNATURE") {
+      actionItems.push({
+        id: `sig-${t.routeId ?? `${t.formKey}-${t.orgId}`}`,
+        kind: "signature",
+        title: `Sign ${t.formCode} — ${t.formTitle}`,
+        subtitle: t.requiredRole ? `${SIGNATORY_LABELS[t.requiredRole] ?? t.requiredRole} is next in this document chain` : "Your signature is next in this document chain",
+        org: t.orgAcronym ? `${t.orgName} (${t.orgAcronym})` : t.orgName,
+        href: t.href,
+        cta: "Review & sign",
+      });
+    } else if (t.type === "RESUBMIT") {
+      actionItems.push({
+        id: `resubmit-${t.routeId ?? `${t.formKey}-${t.orgId}`}`,
+        kind: "resubmit",
+        title: `${t.formCode} — ${t.formTitle}`,
+        subtitle: "OSAS returned the document — review the remarks, correct it, and resubmit",
+        org: t.orgAcronym ? `${t.orgName} (${t.orgAcronym})` : t.orgName,
+        href: t.href,
+        cta: "Fix submission",
+      });
+    }
+  }
+  if (pendingApprovals > 0 && isOfficerHere) {
+    actionItems.push({
+      id: `members-${workOrg.id}`,
+      kind: "application",
+      title: "Approve membership applications",
+      subtitle: `${pendingApprovals} student application${pendingApprovals === 1 ? "" : "s"} ${pendingApprovals === 1 ? "is" : "are"} waiting for your review`,
+      org: workOrg.acronym ?? workOrg.name,
+      href: `/organizations/${workOrg.id}`,
+      cta: "Review",
+    });
+  }
+  if (unmet.length > 0 && (workOrg.applicationStatus === "DRAFT" || workOrg.applicationStatus === "RETURNED")) {
+    actionItems.push({
+      id: `req-${workOrg.id}`,
+      kind: "requirements",
+      title: "Application profile incomplete",
+      subtitle: `${unmet.length} prerequisite${unmet.length === 1 ? "" : "s"} remain${unmet.length === 1 ? "s" : ""} before the application can be filed`,
+      org: workOrg.acronym ?? workOrg.name,
+      href: `/organizations/${workOrg.id}/accreditation`,
+      cta: "Complete",
+    });
+  }
+
+  // ---- Compact status summary ----
+  const statusCells: StatusCell[] = [
+    {
+      label: "Recognition",
+      value: currentRec ? RECOGNITION_STATUS_META[currentRec.status].label : "Not filed",
+      hint: `${ORG_STATE_META[workState].label} · AY ${ay}`,
+      href: `/organizations/${workOrg.id}/accreditation`,
+    },
+    {
+      label: "Prerequisites",
+      value: `${reqMet}/${requirementItems.length}`,
+      hint: `${reqPct}% of the application checklist complete`,
+      progress: reqPct,
+      href: `/organizations/${workOrg.id}/accreditation`,
+    },
+    {
+      label: "Membership",
+      value: `${memberCount}`,
+      hint: pendingApprovals > 0 ? `${pendingApprovals} pending application${pendingApprovals === 1 ? "" : "s"}` : "No pending applications",
+      href: `/organizations/${workOrg.id}`,
+    },
+  ];
+
+  // ---- Deadlines (recognition/renewal, scoped to this org) ----
+  const relevantDeadlines = deadlines
+    .filter(
+      (d) =>
+        (d.process === "RECOGNITION" || d.process === "RENEWAL") &&
+        (!d.scopeCollegeId || d.scopeCollegeId === workOrg.collegeId) &&
+        (d.scopeType === "ALL" || d.scopeType === workOrg.type) &&
+        deadlineStatus(d) !== "CLOSED"
+    )
+    .slice(0, 4);
+
+  // ---- Upcoming activities (real list, never a zero-KPI) ----
+  const now = new Date();
+  const upcomingActivities = activities
+    .filter((a) => a.status === "APPROVED" && a.startAt > now)
+    .sort((a, b) => a.startAt.getTime() - b.startAt.getTime())
+    .slice(0, 3);
+
+  // ---- Recent activity (compact) ----
+  const logItems: TimelineItem[] = recentLogs.map((l) => ({
+    id: l.id,
+    title: AUDIT_ACTION_LABELS[l.action] ?? l.action,
+    meta: timeAgo(l.createdAt),
+    actor: l.user ? fullName(l.user) : "System",
+    tone:
+      l.action.includes("APPROVED") || l.action === "RECOGNITION_CONFERRED"
+        ? "success"
+        : l.action.includes("REJECTED")
+          ? "danger"
+          : l.action.includes("SUBMITTED")
+            ? "warning"
+            : "neutral",
+  }));
+
+  const membershipChips: OfficerContextMembership[] = memberships.map((m) => ({
+    orgId: m.organizationId,
+    name: m.organization.name,
+    acronym: m.organization.acronym,
+    positionLabel: MEMBER_POSITION_LABELS[m.position] ?? "Member",
+  }));
 
   return (
     <>
       <DashboardBriefing
         title={`${greeting()}, ${user.firstName}`}
-        description={isOfficer ? "Manage your organization's recognition and submissions." : "Your organization and participation."}
+        description="Your personal work queue — what needs you right now, and what is happening next."
         rubric={`Officer briefing · AY ${ay}`}
       />
 
-      {memberships.length === 0 ? (
+      <div className="space-y-6">
+        <OfficerContext
+          orgName={workOrg.name}
+          orgAcronym={workOrg.acronym}
+          orgHref={`/organizations/${workOrg.id}`}
+          positionLabel={MEMBER_POSITION_LABELS[primary.position] ?? primary.position}
+          ay={ay}
+          collegeLabel={workOrg.college?.name}
+          recognitionLabel={currentRec ? RECOGNITION_STATUS_META[currentRec.status].label : "Not filed"}
+          recognitionTone={currentRec ? RECOGNITION_STATUS_META[currentRec.status].tone : "neutral"}
+          recognitionDetail={currentRec ? null : `No application record for this academic year`}
+          memberships={membershipChips}
+          activeOrgId={workOrg.id}
+        />
+
+        <OfficerActionRequired items={actionItems} />
+
+        <OfficerStatusSummary cells={statusCells} />
+
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+          <Card>
+            <CardHeader icon={CalendarClock} title="Upcoming deadlines" description="Recognition and renewal windows affecting this organization" />
+            <CardContent className="p-0">
+              {relevantDeadlines.length === 0 ? (
+                <p className="px-5 py-6 text-sm text-content-muted">None published for your organization.</p>
+              ) : (
+                <ul className="divide-y divide-line">
+                  {relevantDeadlines.map((d) => {
+                    const st = deadlineStatus(d);
+                    const t = timeUntil(d.dueDate);
+                    const daysLeft = t.days;
+                    const tone = st === "OPEN" ? (daysLeft <= 7 ? "danger" : daysLeft <= 14 ? "warning" : "info") : "info";
+                    return (
+                      <li key={d.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-5 py-3.5">
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-semibold text-content">{d.name}</p>
+                          <p className="mt-0.5 text-xs text-content-secondary">{formatDate(d.dueDate)}</p>
+                        </div>
+                        <div className="text-right">
+                          <Badge tone={tone}>
+                            {st === "OPEN"
+                              ? daysLeft > 0
+                                ? `${daysLeft} day${daysLeft === 1 ? "" : "s"} remaining`
+                                : `Due today`
+                              : `Opens ${formatDate(d.startDate)}`}
+                          </Badge>
+                          <p className="mt-1 text-[11px] text-content-muted">
+                            {DEADLINE_PROCESS_LABELS[d.process]} · AY {d.academicYear}
+                          </p>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader icon={CalendarDays} title="Upcoming activities" description="Approved activities for this organization" />
+            <CardContent className="p-0">
+              {upcomingActivities.length === 0 ? (
+                <p className="px-5 py-6 text-sm text-content-muted">No upcoming activities.</p>
+              ) : (
+                <>
+                  <ul className="divide-y divide-line">
+                    {upcomingActivities.map((a) => (
+                      <li key={a.id} className="px-5 py-3.5">
+                        <p className="truncate text-sm font-semibold text-content">{a.title}</p>
+                        <p className="mt-0.5 text-xs text-content-secondary">{formatDateTime(a.startAt)}</p>
+                        <p className="mt-1 text-[11px] font-semibold text-success">Approved</p>
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="border-t border-line px-5 py-3">
+                    <Link
+                      href={`/organizations/${workOrg.id}`}
+                      className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline"
+                    >
+                      View activities <ArrowRight className="size-3.5" aria-hidden />
+                    </Link>
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader icon={RefreshCw} title="Recent activity" description={`Latest updates for ${workOrg.acronym ?? workOrg.name}`} />
+            {logItems.length > 0 ? (
+              <Timeline items={logItems} className="py-3" />
+            ) : (
+              <CardContent>
+                <p className="text-sm text-content-muted">No recent activity recorded for this organization.</p>
+              </CardContent>
+            )}
+          </Card>
+        </div>
+      </div>
+    </>
+);
+}
+
+async function MemberDashboard({ user, ay }: { user: { id: string; firstName: string; role: string; collegeId: string | null }; ay: string }) {
+  const memberships = await db.organizationMember.findMany({
+    where: { userId: user.id, isCurrent: true, academicYear: ay },
+    include: {
+      organization: {
+        select: {
+          id: true, name: true, acronym: true, description: true, applicationStatus: true, status: true, collegeId: true, type: true,
+          college: { select: { name: true, code: true } },
+          recognitions: {
+            orderBy: { academicYear: "desc" },
+            select: { id: true, academicYear: true, status: true, kind: true },
+          },
+        },
+      },
+    },
+    orderBy: [{ status: "asc" }, { organization: { name: "asc" } }],
+  });
+
+  const orgIds = memberships.map((m) => m.organizationId);
+  const pendingApplications = memberships.filter((m) => ["APPLIED", "UNDER_REVIEW"].includes(m.status));
+  const joined = memberships.filter((m) => ["ACTIVE", "APPROVED"].includes(m.status));
+
+  const [upcomingActivities, attendanceRecords] = await Promise.all([
+    orgIds.length === 0
+      ? []
+      : db.activityProposal.findMany({
+          where: { organizationId: { in: orgIds }, status: "APPROVED", startAt: { gte: new Date() } },
+          select: {
+            id: true, title: true, venue: true, startAt: true,
+            organization: { select: { name: true, acronym: true } },
+          },
+          orderBy: { startAt: "asc" },
+          take: 5,
+        }),
+    db.activityAttendance.findMany({
+      where: { userId: user.id },
+      include: {
+        activity: {
+          select: {
+            id: true, title: true, startAt: true,
+            organization: { select: { name: true, acronym: true } },
+          },
+        },
+      },
+      orderBy: { recordedAt: "desc" },
+      take: 5,
+    }),
+  ]);
+
+  const attendanceCounts = attendanceRecords.reduce<Record<string, number>>((acc, r) => {
+    acc[r.status] = (acc[r.status] ?? 0) + 1;
+    return acc;
+  }, {});
+
+  return (
+    <>
+      <DashboardBriefing
+        title={`${greeting()}, ${user.firstName}`}
+        description="Your organizations, upcoming activities, and participation record."
+        rubric={`Member briefing · AY ${ay}`}
+      />
+
+      {pendingApplications.length > 0 && (
+        <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-2">
+          {pendingApplications.map((m) => (
+            <Card key={m.id}>
+              <CardHeader icon={UserPlus} title={m.organization.name} description="Your application is awaiting officer review." />
+              <CardContent className="flex items-center justify-between gap-3">
+                <Badge tone={MEMBERSHIP_STATUS_META[m.status]?.tone ?? "warning"}>
+                  {MEMBERSHIP_STATUS_META[m.status]?.label ?? m.status}
+                </Badge>
+                <Link
+                  href={`/organizations/${m.organizationId}`}
+                  className="inline-flex h-8 items-center gap-1 rounded-lg border border-line-strong px-3 text-xs font-semibold text-content hover:border-primary hover:text-primary"
+                >
+                  View <ArrowRight className="size-3.5" aria-hidden />
+                </Link>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {joined.length === 0 ? (
         <EmptyState
-          title="No organization membership"
-          description="You are not currently listed in any student organization. Reach out to your organization officers or the OSAS office."
+          icon={Landmark}
+          title={pendingApplications.length > 0 ? "Application in review" : "Join a student organization"}
+          description={
+            pendingApplications.length > 0
+              ? "Your application is in the officers' hands. You'll see your membership here once it is approved."
+              : "You are not currently listed in any student organization. Find a recognized organization and apply to join."
+          }
+          action={pendingApplications.length === 0 && (
+            <Link
+              href="/organizations"
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-primary px-4 text-sm font-semibold text-white hover:bg-primary-hover"
+            >
+              Find organizations <ArrowRight className="size-4" aria-hidden />
+            </Link>
+          )}
         />
       ) : (
-        <div className="space-y-6">
-          {memberships.map((m) => {
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {joined.map((m) => {
             const org = m.organization;
             const state = deriveOrgState(org, org.recognitions);
-            const currentRec = org.recognitions.find((r) => r.academicYear === ay);
-            const latestRec = org.recognitions[0];
-            const relevantDeadlines = deadlines.filter(
-              (d) =>
-                (d.process === "RECOGNITION" || d.process === "RENEWAL") &&
-                (!d.scopeCollegeId || d.scopeCollegeId === org.collegeId) &&
-                (d.scopeType === "ALL" || d.scopeType === org.type)
-            );
             return (
               <Card key={m.id}>
-                <CardHeader
-                  icon={Landmark}
-                  title={org.name}
-                  description={`${MEMBER_POSITION_LABELS[m.position] ?? SHORT_ROLE_LABELS[user.role as Role]} · ${org.college.code} · AY ${ay}`}
-                  actions={
-                    <Link
-                      href={`/organizations/${org.id}`}
-                      className="inline-flex h-8 items-center gap-1 rounded-lg border border-line-strong px-3 text-xs font-semibold text-content hover:border-primary hover:text-primary"
-                    >
-                      Open profile <ArrowRight className="size-3.5" aria-hidden />
-                    </Link>
-                  }
-                />
-                <CardContent className="grid grid-cols-1 gap-5 md:grid-cols-3">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-wide text-content-secondary">Recognition state</p>
-                    <div className="mt-2">
-                      <Badge tone={ORG_STATE_META[state].tone}>{ORG_STATE_META[state].label}</Badge>
-                      <span className="ml-2">
-                        <Badge tone={m.position === "PRESIDENT" ? "primary" : m.position === "SECRETARY" ? "info" : "neutral"}>
-                          {MEMBER_POSITION_LABELS[m.position] ?? "Member"}
-                        </Badge>
-                      </span>
-                    </div>
-                    {latestRec && (
-                      <p className="mt-2 text-xs text-content-muted">
-                        Latest record: AY {latestRec.academicYear} ·{" "}
-                        {RECOGNITION_STATUS_META[latestRec.status].label}
-                      </p>
-                    )}
-                  </div>
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-wide text-content-secondary">
-                      AY {ay} application
-                    </p>
-                    <div className="mt-2">
-                      {currentRec ? (
-                        <Link href={`/recognition/${currentRec.id}`}>
-                          <Badge tone={RECOGNITION_STATUS_META[currentRec.status].tone}>
-                            {RECOGNITION_STATUS_META[currentRec.status].label}
-                          </Badge>
-                        </Link>
-                      ) : (
-                        <span className="text-sm text-content-muted">Not yet filed</span>
-                      )}
-                    </div>
-                    {isOfficer && !currentRec && (
-                      <Link
-                        href={`/recognition/new?organizationId=${org.id}&kind=${latestRec && latestRec.status === "RECOGNIZED" ? "RENEWAL" : "INITIAL"}`}
-                        className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3 text-xs font-semibold text-white hover:bg-primary-hover"
-                      >
-                        {latestRec?.status === "RECOGNIZED" ? (
-                          <><RefreshCw className="size-3.5" aria-hidden /> Start renewal</>
-                        ) : (
-                          <><Award className="size-3.5" aria-hidden /> Apply for recognition</>
-                        )}
-                      </Link>
-                    )}
-                    {isOfficer && currentRec && RECOGNITION_WORKFLOW.editableStates.includes(currentRec.status) && (
-                      <Link
-                        href={`/recognition/${currentRec.id}`}
-                        className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-lg bg-gold px-3 text-xs font-semibold text-primary-dark hover:bg-gold-dark hover:text-white"
-                      >
-                        <FileSignature className="size-3.5" aria-hidden /> Complete submission
-                      </Link>
-                    )}
-                  </div>
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-wide text-content-secondary">Relevant deadlines</p>
-                    <ul className="mt-2 space-y-2">
-                      {relevantDeadlines.length === 0 && (
-                        <li className="text-sm text-content-muted">None published.</li>
-                      )}
-                      {relevantDeadlines.slice(0, 3).map((d) => {
-                        const st = deadlineStatus(d);
-                        return (
-                          <li key={d.id} className="flex items-center justify-between gap-2 text-xs">
-                            <span className="min-w-0 truncate font-medium text-content">{d.name}</span>
-                            <Badge tone={st === "OPEN" ? "success" : st === "UPCOMING" ? "info" : "neutral"}>
-                              {st === "OPEN" ? `Due ${formatDateTime(d.dueDate)}` : st === "UPCOMING" ? "Upcoming" : "Closed"}
-                            </Badge>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  </div>
+                <CardHeader icon={Landmark} title={org.name} description={`${MEMBER_POSITION_LABELS[m.position] ?? "Member"} · ${org.college.code}`} />
+                <CardContent className="flex items-center justify-between gap-3">
+                  <Badge tone={ORG_STATE_META[state].tone}>{ORG_STATE_META[state].label}</Badge>
+                  <Link
+                    href={`/organizations/${org.id}`}
+                    className="inline-flex h-8 items-center gap-1 rounded-lg border border-line-strong px-3 text-xs font-semibold text-content hover:border-primary hover:text-primary"
+                  >
+                    Open <ArrowRight className="size-3.5" aria-hidden />
+                  </Link>
                 </CardContent>
               </Card>
             );
           })}
         </div>
       )}
+
+      <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <Card>
+          <CardHeader icon={CalendarDays} title="Upcoming activities" description="Approved activities for your organizations." />
+          <CardContent>
+            {upcomingActivities.length === 0 ? (
+              <p className="py-6 text-center text-sm text-content-muted">No upcoming approved activities for your organizations.</p>
+            ) : (
+              <ul className="divide-y divide-line">
+                {upcomingActivities.map((a) => (
+                  <li key={a.id} className="flex items-start justify-between gap-3 py-3 first:pt-0 last:pb-0">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-content">{a.title}</p>
+                      <p className="mt-0.5 text-xs text-content-secondary">
+                        {a.organization.acronym ?? a.organization.name}
+                        {a.venue ? ` · ${a.venue}` : ""}
+                      </p>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <p className="text-xs font-semibold text-content-secondary">{formatDateTime(a.startAt)}</p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <Link
+              href="/calendar"
+              className="mt-4 inline-flex items-center gap-1 text-xs font-semibold text-primary hover:text-primary-hover"
+            >
+              View activity calendar <ArrowRight className="size-3.5" aria-hidden />
+            </Link>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader icon={CalendarCheck} title="My attendance" description="Your recent participation record." />
+          <CardContent>
+            {attendanceRecords.length === 0 ? (
+              <p className="py-6 text-center text-sm text-content-muted">No attendance recorded yet.</p>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  {Object.entries(ATTENDANCE_STATUS_META).map(([status, meta]) => (
+                    <div key={status} className="rounded-lg border border-line p-3">
+                      <p className="font-display text-2xl font-bold text-content">{attendanceCounts[status] ?? 0}</p>
+                      <p className="mt-0.5 text-xs font-semibold text-content-secondary">{meta.label}</p>
+                    </div>
+                  ))}
+                </div>
+                <ul className="mt-4 divide-y divide-line">
+                  {attendanceRecords.map((r) => (
+                    <li key={r.id} className="flex items-center justify-between gap-3 py-2.5 first:pt-0 last:pb-0">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium text-content">{r.activity.title}</p>
+                        <p className="text-xs text-content-muted">{r.activity.organization.acronym ?? r.activity.organization.name}</p>
+                      </div>
+                      <Badge tone={ATTENDANCE_STATUS_META[r.status]?.tone ?? "neutral"}>
+                        {ATTENDANCE_STATUS_META[r.status]?.label ?? r.status}
+                      </Badge>
+                    </li>
+                  ))}
+                </ul>
+                <Link
+                  href="/my/attendance"
+                  className="mt-4 inline-flex items-center gap-1 text-xs font-semibold text-primary hover:text-primary-hover"
+                >
+                  View full attendance <ArrowRight className="size-3.5" aria-hidden />
+                </Link>
+              </>
+            )}
+          </CardContent>
+        </Card>
+      </div>
     </>
   );
 }

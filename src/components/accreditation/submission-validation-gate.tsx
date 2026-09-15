@@ -1,15 +1,13 @@
 "use client";
 
-import { useActionState } from "react";
-import { CheckCircle2, CircleDashed, AlertCircle, ArrowRight } from "lucide-react";
+import { CheckCircle2, CircleDashed, AlertCircle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { ActionForm } from "@/components/action-form";
 import { submitRecognition } from "@/lib/actions/recognition";
-import type { ActionState } from "@/lib/actions/recognition";
 import { REQUIREMENT_STATUS_META } from "@/lib/constants";
-import { SIGNATORY_LABELS } from "@/lib/form-routes";
+import { requirementFormRoute } from "@/lib/form-routes";
 
 interface SubmissionValidationGateProps {
   recognition: {
@@ -32,45 +30,50 @@ interface SubmissionValidationGateProps {
     key: string;
     label: string;
     met: boolean;
-    status: "REQUIRED" | "SUBMITTED" | "UNDER_REVIEW" | "APPROVED" | "RETURNED";
+    filed: boolean;
+    conditional?: boolean;
+    status: "REQUIRED" | "UPLOADED" | "SUBMITTED" | "UNDER_REVIEW" | "APPROVED" | "RETURNED";
   }[];
   organizationId: string;
+  academicYear: string;
 }
 
-export function SubmissionValidationGate({ recognition, requirements, organizationId }: SubmissionValidationGateProps) {
-  const [state, formAction] = useActionState<ActionState, FormData>(submitRecognition, {});
-
-  const incompleteReqs = requirements.filter((r) => !r.met && r.key !== "FINANCIAL_REPORT");
-  const conditionalIncomplete = requirements.filter((r) => !r.met && r.key === "FINANCIAL_REPORT");
-  const returnedReqs = requirements.filter((r) => r.met && r.status === "RETURNED");
+export function SubmissionValidationGate({ recognition, requirements, organizationId, academicYear }: SubmissionValidationGateProps) {
+  // Readiness is driven by "on file", not approval: a filed but pending item
+  // lets the packet be submitted (it only counts as Completed once approved).
+  const missingReqs = requirements.filter((r) => !r.filed && !r.conditional);
+  const filedRequired = requirements.filter((r) => !r.conditional && r.filed).length;
+  const totalRequired = requirements.filter((r) => !r.conditional).length;
+  const conditionalPending = requirements.filter((r) => !r.filed && r.conditional);
+  const returnedReqs = requirements.filter((r) => r.status === "RETURNED");
 
   const allSteps = recognition.signatureRoutes?.flatMap((r) => r.steps) ?? [];
   const totalSteps = allSteps.length;
   const signedSteps = allSteps.filter((s) => s.status === "SIGNED").length;
   const chainOk = totalSteps > 0 ? signedSteps === totalSteps : true;
 
-  const canSubmit = incompleteReqs.length === 0 && recognition.status === "DRAFT" && chainOk;
-  const canResubmit = incompleteReqs.length === 0 && recognition.status === "RETURNED" && chainOk;
+  const canSubmit = missingReqs.length === 0 && recognition.status === "DRAFT" && chainOk;
+  const canResubmit = missingReqs.length === 0 && recognition.status === "RETURNED" && chainOk;
 
   return (
     <div className="space-y-4">
       {/* Validation Summary */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <div className={`p-3 rounded-lg ${incompleteReqs.length === 0 ? "bg-success/10 border border-success/30" : "bg-danger/10 border border-danger/30"}`}>
+        <div className={`p-3 rounded-lg ${missingReqs.length === 0 ? "bg-success/10 border border-success/30" : "bg-danger/10 border border-danger/30"}`}>
           <div className="flex items-center gap-2">
-            {incompleteReqs.length === 0 ? (
+            {missingReqs.length === 0 ? (
               <CheckCircle2 className="size-5 text-success" aria-hidden />
             ) : (
               <AlertCircle className="size-5 text-danger" aria-hidden />
             )}
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-content-muted">Required Documents</p>
-              <p className={`font-display text-xl font-bold ${incompleteReqs.length === 0 ? "text-success" : "text-danger"}`}>
-                {requirements.length - incompleteReqs.length} / {requirements.length - conditionalIncomplete.length}
+              <p className={`font-display text-xl font-bold ${missingReqs.length === 0 ? "text-success" : "text-danger"}`}>
+                {filedRequired} / {totalRequired}
               </p>
             </div>
           </div>
-          {incompleteReqs.length > 0 && (
+          {missingReqs.length > 0 && (
             <p className="mt-2 text-xs text-danger">Submission blocked — complete all required items above.</p>
           )}
         </div>
@@ -90,21 +93,21 @@ export function SubmissionValidationGate({ recognition, requirements, organizati
             </div>
           </div>
           {returnedReqs.length > 0 && (
-            <p className="mt-2 text-xs text-warning">Address returned items before submitting.</p>
+            <p className="mt-2 text-xs text-warning">Replace returned items before submitting.</p>
           )}
         </div>
 
-        <div className={`p-3 rounded-lg ${conditionalIncomplete.length === 0 ? "bg-success/10 border border-success/30" : "bg-primary/10 border border-primary/30"}`}>
+        <div className={`p-3 rounded-lg ${conditionalPending.length === 0 ? "bg-success/10 border border-success/30" : "bg-primary/10 border border-primary/30"}`}>
           <div className="flex items-center gap-2">
-            {conditionalIncomplete.length === 0 ? (
+            {conditionalPending.length === 0 ? (
               <CheckCircle2 className="size-5 text-success" aria-hidden />
             ) : (
               <CircleDashed className="size-5 text-primary" aria-hidden />
             )}
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-content-muted">Conditional</p>
-              <p className={`font-display text-xl font-bold ${conditionalIncomplete.length === 0 ? "text-success" : "text-primary"}`}>
-                {conditionalIncomplete.length === 0 ? "Met" : `${conditionalIncomplete.length} pending`}
+              <p className={`font-display text-xl font-bold ${conditionalPending.length === 0 ? "text-success" : "text-primary"}`}>
+                {conditionalPending.length === 0 ? "Met" : `${conditionalPending.length} pending`}
               </p>
             </div>
           </div>
@@ -134,15 +137,15 @@ export function SubmissionValidationGate({ recognition, requirements, organizati
         </div>
       </div>
 
-      {/* Incomplete Required Items Detail */}
-      {incompleteReqs.length > 0 && (
+      {/* Missing Required Items Detail */}
+      {missingReqs.length > 0 && (
         <Card className="border-danger/30 bg-danger-light/20">
           <div className="p-4">
             <p className="text-xs font-semibold uppercase tracking-wide text-danger mb-2">
               Complete These Required Items
             </p>
             <ul className="space-y-2">
-              {incompleteReqs.map((item) => (
+              {missingReqs.map((item) => (
                 <li key={item.key} className="flex items-center justify-between gap-2 text-sm">
                   <div className="flex items-center gap-2">
                     <CircleDashed className="size-4 text-content-muted" aria-hidden />
@@ -152,7 +155,7 @@ export function SubmissionValidationGate({ recognition, requirements, organizati
                     </Badge>
                   </div>
                   <a
-                    href={`/organizations/${organizationId}/accreditation/forms/${item.key}`}
+                    href={requirementFormRoute(item.key, organizationId, academicYear, recognition.kind)}
                     className="text-xs font-semibold text-primary hover:underline"
                   >
                     Complete
@@ -177,6 +180,12 @@ export function SubmissionValidationGate({ recognition, requirements, organizati
                   <AlertCircle className="size-4 text-warning" aria-hidden />
                   <span className="font-medium text-content">{item.label}</span>
                   <Badge tone="orange">Correction Needed</Badge>
+                  <a
+                    href={requirementFormRoute(item.key, organizationId, academicYear, recognition.kind)}
+                    className="ml-auto text-xs font-semibold text-primary hover:underline"
+                  >
+                    Replace Document
+                  </a>
                 </li>
               ))}
             </ul>
@@ -194,8 +203,8 @@ export function SubmissionValidationGate({ recognition, requirements, organizati
         </ActionForm>
         {(!canSubmit && !canResubmit) && (
           <p className="text-xs text-content-muted">
-            {incompleteReqs.length > 0
-              ? `Complete ${incompleteReqs.length} required item${incompleteReqs.length > 1 ? "s" : ""} first`
+            {missingReqs.length > 0
+              ? `Complete ${missingReqs.length} required item${missingReqs.length > 1 ? "s" : ""} first`
               : returnedReqs.length > 0
               ? "Address returned items first"
               : "Ready to submit"}

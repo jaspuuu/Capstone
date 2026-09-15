@@ -159,6 +159,7 @@ const REQUIREMENT_ORDER: RequirementKey[] = [
   "ADVISER_COMMITMENT",
   "CERTIFICATION",
   "FINANCIAL_REPORT",
+  "SUPPORTING_DOCUMENTS",
 ];
 
 export function requirementLabel(key: RequirementKey): string {
@@ -170,76 +171,200 @@ export function requirementLabel(key: RequirementKey): string {
 export type RequirementItem = {
   key: RequirementKey;
   label: string;
+  /**
+   * Only a final approved state counts as a completed requirement — a filed
+   * but pending document is NOT complete for compliance purposes.
+   */
   met: boolean;
-  /** §23 lifecycle of the document itself, derived from the application's stage. */
+  /**
+   * Whether a document is on file (uploaded / submitted / under review /
+   * returned). Submission readiness checks `filed`, not `met`: the packet can
+   * be submitted once everything is on file, even though requirements only
+   * complete at approval.
+   */
+  filed: boolean;
+  /** §23 lifecycle of the document itself, derived from its source stage. */
   status: RequirementStatus;
+  /**
+   * Process-dependent requirement set. `required` is false for conditional
+   * ("if any") items that must not block submission; `conditional` marks the
+   * item as optional for the current process (e.g. Financial Report, and
+   * Accomplishment Reports for an INITIAL recognition with no prior cycle).
+   */
+  required?: boolean;
+  conditional?: boolean;
 };
 
 export type RequirementStatus =
   | "REQUIRED"
+  | "UPLOADED"
   | "SUBMITTED"
   | "UNDER_REVIEW"
   | "APPROVED"
   | "RETURNED";
 
 /**
- * The seven SF-001 accreditation requirements for one org in one AY.
- * The letter is satisfied by a filed recognition; the other six by tagged
- * attachments (accomplishment reports also count first-class reports).
+ * The eight SF-001 accreditation requirements for one org in one AY.
+ * The letter is satisfied by a filed recognition; the official SF forms by
+ * their tagged attachments; the non-ISO documents by uploaded attachments
+ * (constitution, supporting documents), Part 12 financial submissions
+ * (financial report), and first-class accomplishment report records.
  */
 export function requirementsChecklist(o: OrgSnapshot, ay: string): RequirementItem[] {
   return checklistForYear(o.recognitions, o.requirementFiles, o.reports, ay, o.financialSubmissions);
 }
 
+// Recognition statuses that count as "packet on file" for the letter (incl.
+// RETURNED, so a returned packet still reads as filed for resubmission).
+const LETTER_FILED: string[] = [
+  "SUBMITTED",
+  "UNDER_REVIEW",
+  "FOR_APPROVAL",
+  "FOR_SIGNATURE",
+  "APPROVED",
+  "RECOGNIZED",
+  "RETURNED",
+];
+
+/** Map the recognition's stage onto the per-document lifecycle status. */
+function requirementLifecycleStatus(
+  recStatus: string | null | undefined,
+  filed: boolean
+): RequirementStatus {
+  if (!filed || !recStatus) return "REQUIRED";
+  switch (recStatus) {
+    case "APPROVED":
+    case "RECOGNIZED":
+      return "APPROVED";
+    case "RETURNED":
+      return "RETURNED";
+    case "UNDER_REVIEW":
+    case "FOR_APPROVAL":
+    case "FOR_SIGNATURE":
+      return "UNDER_REVIEW";
+    case "SUBMITTED":
+      return "SUBMITTED";
+    case "DRAFT":
+      return "UPLOADED";
+    default:
+      return "REQUIRED";
+  }
+}
+
+/** Highest-status accomplishment report for the year, in lifecycle terms. */
+function bestReportStatus(
+  reports: { academicYear: string; status: string }[],
+  ay: string
+): RequirementStatus | null {
+  const precedence: [string, RequirementStatus][] = [
+    ["ACCEPTED", "APPROVED"],
+    ["RETURNED", "RETURNED"],
+    ["SUBMITTED", "SUBMITTED"],
+    ["DRAFT", "UPLOADED"],
+  ];
+  for (const [raw, mapped] of precedence) {
+    if (reports.some((r) => r.academicYear === ay && r.status === raw)) return mapped;
+  }
+  return null;
+}
+
+/** Highest-status Part 12 financial submission for the year. */
+function bestFinancialStatus(
+  subs: { academicYear: string; status: string }[],
+  ay: string
+): RequirementStatus | null {
+  const precedence: [string, RequirementStatus][] = [
+    ["APPROVED", "APPROVED"],
+    ["ARCHIVED", "APPROVED"],
+    ["RETURNED", "RETURNED"],
+    ["UNDER_REVIEW", "UNDER_REVIEW"],
+    ["SUBMITTED", "SUBMITTED"],
+    ["RESUBMITTED", "SUBMITTED"],
+    ["INCOMPLETE", "UPLOADED"],
+    ["DRAFT", "UPLOADED"],
+  ];
+  for (const [raw, mapped] of precedence) {
+    if (subs.some((s) => s.academicYear === ay && s.status === raw)) return mapped;
+  }
+  return null;
+}
+
+const REPORT_FILED = new Set(["SUBMITTED", "ACCEPTED", "RETURNED"]);
+
 /**
  * Narrow-input variant used by the per-org document repository page and the
- * renewal progress overview. The document's status follows the application
- * it is attached to: submitted docs are Under Review while the application
- * is being processed, Approved once it is recognized, Returned if it bounces.
- * Financial submissions (Part 12) satisfy the FINANCIAL_REPORT requirement
- * when present for the year.
+ * renewal progress overview. Requirements only count as Completed once the
+ * application reaches a final approved state; documents that are merely
+ * uploaded/submitted/under review are `filed` but not complete. Financial
+ * submissions (Part 12) satisfy the FINANCIAL_REPORT requirement when present
+ * for the year.
  */
 export function checklistForYear(
-  recognitions: { academicYear: string; status: string }[],
+  recognitions: { academicYear: string; status: string; kind?: string }[],
   requirementFiles: { academicYear: string; kind: string | null }[],
   reports: { academicYear: string; status: string }[],
   ay: string,
-  financialSubmissions?: { academicYear: string; status: string }[]
+  financialSubmissions?: { academicYear: string; status: string }[],
+  kind?: string
 ): RequirementItem[] {
-  const letterMet = recognitions.some(
-    (r) => r.academicYear === ay && FILED_RECOGNITION.includes(r.status as never)
-  );
+  const yearRec = recognitions.find((r) => r.academicYear === ay);
+  const recStatus = yearRec?.status ?? null;
+  const letterFiled = yearRec != null && LETTER_FILED.includes(recStatus as string);
+
   const tagged = new Set(
     requirementFiles.filter((f) => f.academicYear === ay).map((f) => f.kind)
   );
+  const taggedStatus = (key: string): RequirementStatus =>
+    requirementLifecycleStatus(recStatus, tagged.has(key));
 
-  const yearStatuses = new Set(
-    recognitions.filter((r) => r.academicYear === ay).map((r) => r.status)
-  );
-  const deriveStatus = (met: boolean): RequirementStatus => {
-    if (!met) return "REQUIRED";
-    if (yearStatuses.has("APPROVED") || yearStatuses.has("RECOGNIZED")) return "APPROVED";
-    if (yearStatuses.has("RETURNED")) return "RETURNED";
-    if (["SUBMITTED", "UNDER_REVIEW", "FOR_APPROVAL"].some((s) => yearStatuses.has(s))) {
-      return "UNDER_REVIEW";
+  const finStatus = bestFinancialStatus(financialSubmissions ?? [], ay);
+  const finFiled = tagged.has("FINANCIAL_REPORT") || finStatus != null;
+  const finFinal = finStatus != null ? finStatus : taggedStatus("FINANCIAL_REPORT");
+
+  const reportStatus = bestReportStatus(reports, ay);
+  const reportFiled =
+    reports.some((r) => r.academicYear === ay && REPORT_FILED.has(r.status)) ||
+    tagged.has("ACCOMPLISHMENT_REPORTS");
+  const reportFinal =
+    reportStatus != null ? reportStatus : taggedStatus("ACCOMPLISHMENT_REPORTS");
+
+  // The requirement set is process-dependent (§ official SF-001). An INITIAL
+  // recognition has no prior cycle, so Accomplishment Reports are not a normal
+  // required item; Financial Report is always conditional ("if any"). When no
+  // kind is supplied (aggregate/OSAS views) the legacy full set is returned.
+  const isInitial = kind === "INITIAL";
+
+  return REQUIREMENT_ORDER.filter((key) => {
+    if (key === "ACCOMPLISHMENT_REPORTS" && isInitial) return false;
+    return true;
+  }).map((key) => {
+    let filed: boolean;
+    let status: RequirementStatus;
+    if (key === APPLICATION_LETTER_KEY) {
+      filed = letterFiled;
+      status = letterFiled ? requirementLifecycleStatus(recStatus, true) : "REQUIRED";
+    } else if (key === "FINANCIAL_REPORT") {
+      filed = finFiled;
+      status = finFiled ? finFinal : "REQUIRED";
+    } else if (key === "ACCOMPLISHMENT_REPORTS") {
+      filed = reportFiled;
+      status = reportFiled ? reportFinal : "REQUIRED";
+    } else {
+      filed = tagged.has(key);
+      status = filed ? taggedStatus(key) : "REQUIRED";
     }
-    return "SUBMITTED";
-  };
 
-  return REQUIREMENT_ORDER.map((key) => {
-    const met =
-      key === APPLICATION_LETTER_KEY
-        ? letterMet
-        : tagged.has(key) ||
-          (key === "FINANCIAL_REPORT" &&
-            (financialSubmissions?.some((s) => s.academicYear === ay && FILED_FINANCIAL.has(s.status)) ?? false)) ||
-          (key === "ACCOMPLISHMENT_REPORTS" &&
-            reports.some((r) => r.academicYear === ay && FILED_REPORT.includes(r.status as never)));
+    const conditional =
+      key === "FINANCIAL_REPORT" || (key === "ACCOMPLISHMENT_REPORTS" && isInitial);
+
     return {
       key,
       label: requirementLabel(key),
-      met,
-      status: deriveStatus(met),
+      met: status === "APPROVED",
+      filed,
+      status,
+      required: !conditional,
+      conditional,
     };
   });
 }
@@ -775,6 +900,47 @@ export function signatureBottlenecks(steps: { role: SignatoryRole }[]): Signatur
   for (const s of steps) counts.set(s.role, (counts.get(s.role) ?? 0) + 1);
   return [...counts.entries()]
     .map(([role, count]) => ({ role, label: SIGNATORY_LABELS[role] ?? role, count }))
+    .sort((a, b) => b.count - a.count);
+}
+
+// --- Diagnostic: return/revision patterns ---------------------------------------------
+
+export type RevisionReason = { reason: string; count: number };
+
+export type RepeatedRevision = { recognitionId: string; count: number };
+
+/**
+ * Common reasons applications were returned for revision, grouped by the
+ * reviewer's written note. Un-named returns roll up under "No specific reason
+ * given"; the most frequent reasons are ranked first.
+ */
+export function diagnoseRevisionReasons(
+  events: { action: string; note: string | null }[]
+): RevisionReason[] {
+  const counts = new Map<string, number>();
+  for (const e of events) {
+    if (e.action !== "RETURN") continue;
+    const reason = (e.note ?? "").trim() || "No specific reason given";
+    const key = reason.length > 90 ? `${reason.slice(0, 90)}…` : reason;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([reason, count]) => ({ reason, count }))
+    .sort((a, b) => b.count - a.count);
+}
+
+/** Applications that were returned for revision more than once — a repeat-offender signal. */
+export function diagnoseRepeatedRevisions(
+  events: { recognitionId: string; action: string }[]
+): RepeatedRevision[] {
+  const counts = new Map<string, number>();
+  for (const e of events) {
+    if (e.action !== "RETURN") continue;
+    counts.set(e.recognitionId, (counts.get(e.recognitionId) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .filter(([, count]) => count > 1)
+    .map(([recognitionId, count]) => ({ recognitionId, count }))
     .sort((a, b) => b.count - a.count);
 }
 

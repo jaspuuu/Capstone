@@ -3,11 +3,12 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import type { Role } from "@/generated/prisma/client";
+import type { AccountStatus, Role } from "@/generated/prisma/client";
 import { db } from "@/lib/db";
 import { requirePermissionOrThrow } from "@/lib/auth/guards";
 import { hashPassword } from "@/lib/auth/password";
 import { writeAudit } from "@/lib/audit";
+import { isOfficerRole } from "@/lib/constants";
 
 export type ActionState = { error?: string; success?: string };
 
@@ -60,6 +61,12 @@ export async function createUser(_prev: ActionState, formData: FormData): Promis
   // Deans must be attached to a college.
   if (d.role === "DEAN" && !d.collegeId) {
     return { error: "A dean must be assigned to a college." };
+  }
+
+  // Officer positions derive from organization memberships — they are never
+  // provisioned onto an account (§account model).
+  if (isOfficerRole(d.role)) {
+    return { error: "Officer roles are assigned through organization memberships, not here." };
   }
 
   const existing = await db.user.findUnique({ where: { email: d.email } });
@@ -129,6 +136,11 @@ export async function updateUser(_prev: ActionState, formData: FormData): Promis
   if (d.role === "DEAN" && !d.collegeId) {
     return { error: "A dean must be assigned to a college." };
   }
+  // Provisioning hygiene: legacy officer accounts keep their role, but an
+  // admin cannot promote an account to an officer role here (§account model).
+  if (isOfficerRole(d.role) && d.role !== existing.role) {
+    return { error: "Officer roles are assigned through organization memberships, not here." };
+  }
 
   const emailClash = await db.user.findFirst({ where: { email: d.email, NOT: { id } } });
   if (emailClash) return { error: "Another account already uses this email." };
@@ -174,32 +186,51 @@ export async function updateUser(_prev: ActionState, formData: FormData): Promis
   redirect("/users");
 }
 
-export async function setUserActive(formData: FormData): Promise<void> {
+const ACCOUNT_STATUSES = ["PENDING", "ACTIVE", "SUSPENDED", "DEACTIVATED", "ARCHIVED"] as const;
+
+/**
+ * Account lifecycle transition. `accountStatus` is the source of truth; the
+ * denormalized `isActive` flag is derived so existing `.isActive` filters
+ * behave identically. Only ACTIVE accounts may sign in.
+ */
+export async function setUserAccountStatus(
+  _prev: ActionState,
+  formData: FormData
+): Promise<ActionState> {
   const admin = await requirePermissionOrThrow("users.manage");
   const id = String(formData.get("id") ?? "");
-  const isActive = String(formData.get("isActive") ?? "") === "true";
+  const rawStatus = String(formData.get("status") ?? "");
 
-  if (id === admin.id) return; // cannot deactivate yourself
+  if (!(ACCOUNT_STATUSES as readonly string[]).includes(rawStatus)) {
+    return { error: "Invalid account status." };
+  }
+  if (id === admin.id) {
+    return { error: "You cannot change your own account status." };
+  }
 
   const existing = await db.user.findUnique({ where: { id } });
-  if (!existing) return;
+  if (!existing) return { error: "Account not found." };
 
-  await db.user.update({ where: { id }, data: { isActive } });
-  // Revoke active sessions so deactivation takes effect immediately.
+  const accountStatus = rawStatus as AccountStatus;
+  const isActive = accountStatus === "ACTIVE";
+
+  await db.user.update({ where: { id }, data: { accountStatus, isActive } });
+  // Suspend/deactivate/archive takes effect immediately by revoking sessions.
   if (!isActive) {
     await db.session.deleteMany({ where: { userId: id } });
   }
 
   await writeAudit({
     userId: admin.id,
-    action: isActive ? "USER_ACTIVATED" : "USER_DEACTIVATED",
+    action: "USER_STATUS_CHANGED",
     entityType: "User",
     entityId: id,
     entityLabel: existing.email,
-    previousState: { isActive: existing.isActive },
-    newState: { isActive },
+    previousState: { accountStatus: existing.accountStatus, isActive: existing.isActive },
+    newState: { accountStatus, isActive },
   });
   revalidatePath("/users");
+  return { success: "Account status updated." };
 }
 
 export async function resetPassword(_prev: ActionState, formData: FormData): Promise<ActionState> {

@@ -7,10 +7,15 @@ import { cn } from "@/lib/utils";
 
 export type Point = { label: string; value: number };
 
+/** Stable, unique-ish id suffix for SVG gradient defs (one gradient per chart). */
+function slug(s: string): string {
+  return s.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "chart";
+}
+
 export function BarChart({
   data,
   height = 160,
-  barClassName = "fill-primary",
+  barClassName,
   ariaLabel,
 }: {
   data: Point[];
@@ -20,6 +25,7 @@ export function BarChart({
 }) {
   const max = Math.max(1, ...data.map((d) => d.value));
   const slot = 100 / Math.max(1, data.length);
+  const gid = `bargrad-${slug(ariaLabel)}`;
   return (
     <figure>
       <svg
@@ -29,8 +35,23 @@ export function BarChart({
         role="img"
         aria-label={ariaLabel}
       >
+        <defs>
+          <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#174b7a" />
+            <stop offset="100%" stopColor="#123b63" />
+          </linearGradient>
+        </defs>
+        <line
+          x1="0"
+          y1={height - 20}
+          x2="100"
+          y2={height - 20}
+          className="stroke-line-strong"
+          strokeWidth={1}
+          vectorEffect="non-scaling-stroke"
+        />
         {data.map((d, i) => {
-          const h = (d.value / max) * (height - 24);
+          const h = (d.value / max) * (height - 28);
           return (
             <g key={d.label}>
               <rect
@@ -38,8 +59,9 @@ export function BarChart({
                 y={height - 20 - h}
                 width={slot * 0.7}
                 height={Math.max(h, d.value > 0 ? 2 : 0)}
+                rx={3}
                 className={barClassName}
-                rx={1}
+                {...(barClassName ? {} : { fill: `url(#${gid})` })}
               />
             </g>
           );
@@ -74,6 +96,8 @@ export function LineChart({
   }));
   const path = pts.map((p, i) => `${i === 0 ? "M" : "L"}${p.x},${p.y}`).join(" ");
   const area = `${path} L${pts[pts.length - 1]?.x ?? 0},${height - 20} L${pts[0]?.x ?? 0},${height - 20} Z`;
+  const gid = `linegrad-${slug(ariaLabel)}`;
+  const last = pts[pts.length - 1];
   return (
     <figure>
       <svg
@@ -83,19 +107,52 @@ export function LineChart({
         role="img"
         aria-label={ariaLabel}
       >
-        {data.length > 1 && (
-          <path d={area} className="fill-primary-light" opacity={0.6} />
-        )}
+        <defs>
+          <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#174b7a" stopOpacity="0.28" />
+            <stop offset="70%" stopColor="#174b7a" stopOpacity="0.06" />
+            <stop offset="100%" stopColor="#174b7a" stopOpacity="0.02" />
+          </linearGradient>
+        </defs>
+        <line
+          x1="0"
+          y1={height - 20}
+          x2="100"
+          y2={height - 20}
+          className="stroke-line-strong"
+          strokeWidth={1}
+          vectorEffect="non-scaling-stroke"
+        />
+        {data.length > 1 && <path d={area} fill={`url(#${gid})`} />}
         <path
           d={path}
           fill="none"
-          strokeWidth={1.5}
+          strokeWidth={2}
+          strokeLinecap="round"
+          strokeLinejoin="round"
           className="stroke-primary"
           vectorEffect="non-scaling-stroke"
         />
         {pts.map((p, i) => (
-          <circle key={i} cx={p.x} cy={p.y} r={1.4} className="fill-primary" />
+          <circle
+            key={i}
+            cx={p.x}
+            cy={p.y}
+            r={i === pts.length - 1 ? 2.2 : 1.5}
+            className={i === pts.length - 1 ? "fill-gold" : "fill-primary"}
+          />
         ))}
+        {last && (
+          <circle
+            cx={last.x}
+            cy={last.y}
+            r={3.4}
+            fill="none"
+            strokeWidth={1.2}
+            className="stroke-gold"
+            vectorEffect="non-scaling-stroke"
+          />
+        )}
       </svg>
       <figcaption className="mt-2 flex justify-between gap-1 text-[11px] text-content-secondary">
         {data.map((d) => (
@@ -309,41 +366,49 @@ export function DonutChart({
   const total = data.reduce((s, d) => s + d.value, 0);
   const R = 40;
   const C = 2 * Math.PI * R;
+  const GAP = 1.8; // hairline gap between slices
   let acc = 0;
   return (
     <figure className="flex items-center gap-4">
-      <svg
-        viewBox="0 0 100 100"
-        width={size}
-        height={size}
-        className="shrink-0"
-        role="img"
-        aria-label={total > 0 ? ariaLabel : `${ariaLabel} — no data`}
-      >
-        <circle cx="50" cy="50" r={R} fill="none" strokeWidth={18} className="stroke-surface-secondary" />
-        {total > 0 &&
-          data.map((d) => {
-            const frac = d.value / total;
-            const dash = frac * C;
-            const offset = -acc * C;
-            acc += frac;
-            if (frac <= 0) return null;
-            return (
-              <circle
-                key={d.label}
-                cx="50"
-                cy="50"
-                r={R}
-                fill="none"
-                strokeWidth={18}
-                strokeDasharray={`${dash} ${C - dash}`}
-                strokeDashoffset={offset}
-                transform="rotate(-90 50 50)"
-                className={SLICE_TONES[d.tone].stroke}
-              />
-            );
-          })}
-      </svg>
+      <div className="relative shrink-0">
+        <svg
+          viewBox="0 0 100 100"
+          width={size}
+          height={size}
+          role="img"
+          aria-label={total > 0 ? ariaLabel : `${ariaLabel} — no data`}
+        >
+          <circle cx="50" cy="50" r={R} fill="none" strokeWidth={18} className="stroke-surface-secondary" />
+          {total > 0 &&
+            data.map((d) => {
+              const frac = d.value / total;
+              const dash = Math.max(frac * C - GAP, 0);
+              const offset = -acc * C;
+              acc += frac;
+              if (dash <= 0) return null;
+              return (
+                <circle
+                  key={d.label}
+                  cx="50"
+                  cy="50"
+                  r={R}
+                  fill="none"
+                  strokeWidth={18}
+                  strokeDasharray={`${dash} ${C - dash}`}
+                  strokeDashoffset={offset}
+                  transform="rotate(-90 50 50)"
+                  className={SLICE_TONES[d.tone].stroke}
+                />
+              );
+            })}
+        </svg>
+        <span
+          aria-hidden
+          className="absolute inset-0 flex items-center justify-center font-display text-lg font-bold tabular-nums text-content"
+        >
+          {total}
+        </span>
+      </div>
       <figcaption className="grow space-y-1 text-xs">
         {data.map((d) => (
           <div key={d.label} className="flex items-center gap-2">

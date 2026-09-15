@@ -8,6 +8,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient, RecognitionStatus } from "../src/generated/prisma/client";
 import { hashPassword } from "../src/lib/auth/password";
 import { formRoute, sfRouteEntityId } from "../src/lib/form-routes";
+import { formTemplateSeedRows } from "../src/lib/forms-registry";
 import {
   hashChainStep,
   signatureContentHash,
@@ -40,28 +41,38 @@ async function main() {
   // ---------------------------------------------------------------- Users
   const osas = await prisma.user.upsert({
     where: { email: "osas@lspu.edu.ph" },
-    update: {},
+    update: {
+      firstName: "Jeanfel",
+      lastName: "Casiño",
+      middleName: null,
+      positionTitle: "Director/Chairperson, Office of Student Affairs and Services",
+    },
     create: {
       email: "osas@lspu.edu.ph",
       passwordHash: pw,
-      firstName: "Maria Elena",
-      lastName: "Santos",
-      middleName: "Reyes",
+      firstName: "Jeanfel",
+      lastName: "Casiño",
       role: "OSAS",
-      positionTitle: "Director, Office of Student Affairs and Services",
+      positionTitle: "Director/Chairperson, Office of Student Affairs and Services",
     },
   });
 
   const soa = await prisma.user.upsert({
     where: { email: "soa@lspu.edu.ph" },
-    update: {},
+    update: {
+      firstName: "Niño Emmanuele Aldi",
+      lastName: "Astovesa",
+      middleName: "L",
+      positionTitle: "Coordinator, Student Organization Unit",
+    },
     create: {
       email: "soa@lspu.edu.ph",
       passwordHash: pw,
-      firstName: "Jonathan",
-      lastName: "Cruz",
+      firstName: "Niño Emmanuele Aldi",
+      lastName: "Astovesa",
+      middleName: "L",
       role: "SOA",
-      positionTitle: "Student Activities Coordinator",
+      positionTitle: "Coordinator, Student Organization Unit",
     },
   });
 
@@ -146,68 +157,52 @@ async function main() {
     },
   });
 
-  // ------------------------------------------------------- Bulk demo accounts
-  // Create only — not wired into any organization roster. Idempotent by email.
-  // Student numbers are assigned sequentially (not randomized) so they stay unique.
-  const makeAccounts = (
-    rows: { email: string; role: string; firstName: string; lastName: string; middleName?: string }[],
-    startStudentIndex: number
-  ) =>
-    Promise.all(
-      rows.map((r, i) =>
-        prisma.user.upsert({
-          where: { email: r.email },
-          update: {},
-          create: {
-            email: r.email,
-            passwordHash: pw,
-            firstName: r.firstName,
-            lastName: r.lastName,
-            middleName: r.middleName,
-            role: r.role as never,
-            studentNumber:
-              r.role === "MEMBER" || r.role === "PRESIDENT"
-                ? `20${21 + ((startStudentIndex + i) % 4)}-${String(30000 + startStudentIndex + i).slice(0, 5)}`
-                : undefined,
-            positionTitle: "Student",
-          },
-        })
-      )
-    );
-
-  const bulkPresidents = [] as { email: string; role: string; firstName: string; lastName: string }[];
-  for (let i = 1; i <= 8; i += 1) {
-    bulkPresidents.push({
-      email: `president.mass${i}@lspu.edu.ph`,
-      role: "PRESIDENT",
-      firstName: `President`,
-      lastName: `Mass${i}`,
-    });
-  }
-  const bulkAdvisers = [] as { email: string; role: string; firstName: string; lastName: string }[];
-  for (let i = 1; i <= 20; i += 1) {
-    const role = i % 2 === 0 ? "ADVISER_REGULAR" : "ADVISER_PARTTIME";
-    bulkAdvisers.push({
-      email: `adviser.mass${i}@lspu.edu.ph`,
-      role,
-      firstName: `Adviser`,
-      lastName: `Mass${i}`,
-    });
-  }
-  const bulkMembers = [] as { email: string; role: string; firstName: string; lastName: string }[];
-  for (let i = 1; i <= 50; i += 1) {
-    bulkMembers.push({
-      email: `member.mass${i}@lspu.edu.ph`,
+  const member2 = await prisma.user.upsert({
+    where: { email: "member2.acs@lspu.edu.ph" },
+    update: {},
+    create: {
+      email: "member2.acs@lspu.edu.ph",
+      passwordHash: pw,
+      firstName: "Nicole",
+      lastName: "Domingo",
       role: "MEMBER",
-      firstName: `Member`,
-      lastName: `Mass${i}`,
+      studentNumber: "2023-11504",
+      positionTitle: "Student",
+    },
+  });
+
+  // ------------------------------------------- Additional named demo accounts
+  // One distinct secretary (for the application demo) plus extra members.
+  // Idempotent by email.
+  const extraDemoAccounts = [
+    { email: "secretary.sbo@lspu.edu.ph", role: "SECRETARY", firstName: "Sofia", lastName: "Reyes", studentNumber: "2022-08112" },
+    { email: "member3.acs@lspu.edu.ph", role: "MEMBER", firstName: "Rafael", lastName: "Salvador", studentNumber: "2023-11033" },
+    { email: "member4.acs@lspu.edu.ph", role: "MEMBER", firstName: "Camille", lastName: "Torres", studentNumber: "2023-11247" },
+    { email: "member5.acs@lspu.edu.ph", role: "MEMBER", firstName: "Daniel", lastName: "Aquino", studentNumber: "2023-11390" },
+    { email: "member6.acs@lspu.edu.ph", role: "MEMBER", firstName: "Bea", lastName: "Santos", studentNumber: "2023-11481" },
+    { email: "member7.acs@lspu.edu.ph", role: "MEMBER", firstName: "Carlo", lastName: "Garcia", studentNumber: "2023-11666" },
+    { email: "member8.acs@lspu.edu.ph", role: "MEMBER", firstName: "Sienna", lastName: "Cruz", studentNumber: "2023-11772" },
+    { email: "member9.acs@lspu.edu.ph", role: "MEMBER", firstName: "Miguel", lastName: "Reyes", studentNumber: "2023-11854" },
+    { email: "member10.acs@lspu.edu.ph", role: "MEMBER", firstName: "Ella", lastName: "Fernandez", studentNumber: "2023-11999" },
+  ] as const;
+  for (const a of extraDemoAccounts) {
+    await prisma.user.upsert({
+      where: { email: a.email },
+      update: { firstName: a.firstName, lastName: a.lastName, studentNumber: a.studentNumber },
+      create: {
+        email: a.email,
+        passwordHash: pw,
+        firstName: a.firstName,
+        lastName: a.lastName,
+        role: a.role as never,
+        studentNumber: a.studentNumber,
+        positionTitle: "Student",
+      },
     });
   }
-  const bulkAccounts = [...bulkPresidents, ...bulkAdvisers, ...bulkMembers];
-  await makeAccounts(bulkAccounts, 0);
-  console.log(`Bulk demo accounts ensured (${bulkAccounts.length}): ${bulkPresidents.length} presidents, ${bulkAdvisers.length} advisers, ${bulkMembers.length} members.`);
 
   // ------------------------------------------------------------ Colleges
+  // LSPU-OSAS academic structure — six colleges.
   const ccs = await prisma.college.upsert({
     where: { code: "CCS" },
     update: { deanId: deanCcs.id },
@@ -220,25 +215,40 @@ async function main() {
     update: {},
     create: { name: "College of Engineering", code: "COE" },
   });
-  const cba = await prisma.college.upsert({
-    where: { code: "CBA" },
-    update: {},
-    create: { name: "College of Business Administration", code: "CBA" },
-  });
   await prisma.college.upsert({
-    where: { code: "COEd" },
+    where: { code: "CA" },
     update: {},
-    create: { name: "College of Education", code: "COEd" },
+    create: { name: "College of Agriculture", code: "CA" },
+  });
+  const cbaa = await prisma.college.upsert({
+    where: { code: "CBAA" },
+    update: { name: "College of Business Administration and Accountancy" },
+    create: { name: "College of Business Administration and Accountancy", code: "CBAA" },
   });
   await prisma.college.upsert({
     where: { code: "CAS" },
-    update: {},
-    create: { name: "College of Arts and Sciences", code: "CAS" },
+    update: { name: "College of Arts and Science" },
+    create: { name: "College of Arts and Science", code: "CAS" },
   });
   await prisma.college.upsert({
-    where: { code: "CON" },
+    where: { code: "CCJE" },
     update: {},
-    create: { name: "College of Nursing", code: "CON" },
+    create: { name: "College of Criminal Justice Education", code: "CCJE" },
+  });
+  const cihtm = await prisma.college.upsert({
+    where: { code: "CIHTM" },
+    update: {},
+    create: { name: "College of International Hospitality and Tourism Management", code: "CIHTM" },
+  });
+  await prisma.college.upsert({
+    where: { code: "CTE" },
+    update: {},
+    create: { name: "College of Teacher Education", code: "CTE" },
+  });
+  await prisma.college.upsert({
+    where: { code: "CFND" },
+    update: {},
+    create: { name: "College of Food Nutrition and Dietetics", code: "CFND" },
   });
 
   await prisma.department.upsert({
@@ -259,14 +269,7 @@ async function main() {
   await prisma.department.upsert({
     where: { code: "ACCTG" },
     update: {},
-    create: { name: "Accountancy", code: "ACCTG", collegeId: cba.id },
-  });
-
-  // College hosting the hospitality-management mother organization.
-  const ofhmCollege = await prisma.college.upsert({
-    where: { code: "OFHM" },
-    update: {},
-    create: { name: "Organization of Future Hospitality Managers", code: "OFHM" },
+    create: { name: "Accountancy", code: "ACCTG", collegeId: cbaa.id },
   });
 
   // ------------------------------------------- Remove placeholder mock orgs
@@ -314,7 +317,7 @@ async function main() {
     description:
       "Mother organization for hospitality-management student organizations under OFHM.",
     type: "MOTHER",
-    collegeId: ofhmCollege.id,
+    collegeId: cihtm.id,
     foundedYear: 2005,
   });
   const cbaaSbo = await mkOrg("CBAA-SBO", {
@@ -322,7 +325,7 @@ async function main() {
     description:
       "The mother organization of all College of Business Administration and Accountancy student organizations.",
     type: "MOTHER",
-    collegeId: cba.id,
+    collegeId: cbaa.id,
     foundedYear: 1995,
   });
   const graphicos = await mkOrg("GRAPHICOS", {
@@ -344,10 +347,67 @@ async function main() {
     foundedYear: 2016,
   });
 
+  // Scenario C live data: an established org that already holds prior
+  // recognition but has NOT filed its renewals for the current AY → the app
+  // derives the "Renewal Due / PENDING_RENEWAL" state, so the accreditation
+  // page's "Start Renewal" quick-start (with document carry-over) is presentable.
+  // Idempotent by acronym.
+  const apdev = await prisma.organization.findFirst({ where: { acronym: "APDEV" } });
+  if (!apdev) {
+    const regAdviser = adviserRegular;
+    const apdevPresident = presidentAcs;
+    const apdevSecretary = await prisma.user.findUnique({ where: { email: "secretary.sbo@lspu.edu.ph" } });
+    const roster = await prisma.user.findMany({
+      where: { email: { in: Array.from({ length: 10 }, (_, i) => `member${i + 1}.acs@lspu.edu.ph`) } },
+    });
+    const created = await prisma.organization.create({
+      data: {
+        name: "Application Development Society",
+        acronym: "APDEV",
+        description:
+          "Sub-organization of CCS-SBO for application development, software engineering, and hackathon teams. Recognized last AY; renewal for AY 2026-2027 is due.",
+        type: "CHILD",
+        parentId: ccsSbo.id,
+        collegeId: ccs.id,
+        status: "ACTIVE",
+        applicationStatus: "RECOGNIZED",
+        foundedYear: 2019,
+      },
+    });
+    if (apdevSecretary) {
+      await prisma.organizationMember.createMany({
+        data: [
+          { organizationId: created.id, userId: apdevPresident.id, position: "PRESIDENT", status: "ACTIVE", academicYear: AY_CUR },
+          { organizationId: created.id, userId: apdevSecretary.id, position: "SECRETARY", status: "ACTIVE", academicYear: AY_CUR },
+          ...roster.map((u) => ({
+            organizationId: created.id,
+            userId: u.id,
+            position: "MEMBER" as const,
+            status: "ACTIVE" as const,
+            academicYear: AY_CUR,
+          })),
+        ],
+        skipDuplicates: true,
+      });
+    }
+    await prisma.adviserAssignment.create({
+      data: {
+        organizationId: created.id,
+        adviserId: regAdviser.id,
+        type: "REGULAR",
+        academicYear: AY_CUR,
+        isCurrent: true,
+      },
+    });
+    console.log("Seeded PENDING_RENEWAL demo org APDEV (renewal due).");
+  }
+
   // ------------------------------------------------- Members & advisers
   await prisma.organizationMember.createMany({
     data: [
       { organizationId: ccsSbo.id, userId: presidentAcs.id, position: "PRESIDENT", academicYear: AY_CUR },
+      { organizationId: ccsSbo.id, userId: member2.id, position: "VICE_PRESIDENT", academicYear: AY_CUR },
+      { organizationId: ccsSbo.id, userId: member1.id, position: "TREASURER", academicYear: AY_CUR },
       { organizationId: robotics.id, userId: member1.id, position: "MEMBER", academicYear: AY_CUR },
       { organizationId: graphicos.id, userId: secretaryJpia.id, position: "SECRETARY", academicYear: AY_CUR },
     ],
@@ -423,6 +483,111 @@ async function main() {
   await decidedHistory(robotics.id, AY_CUR, "RENEWAL", "RECOGNIZED");
   } else {
     console.log("Recognitions for AY %s already present — skipping lifecycle seed.", AY_CUR);
+  }
+
+  // Recognized last AY only — drive the PENDING_RENEWAL demo (Scenario C).
+  const apdevRenewalTarget = await prisma.organization.findFirst({ where: { acronym: "APDEV" } });
+  if (apdevRenewalTarget) {
+    const prior = await prisma.recognition.findFirst({
+      where: { organizationId: apdevRenewalTarget.id, status: "RECOGNIZED" },
+      select: { id: true, academicYear: true },
+    });
+    if (!prior) {
+      const rec = await prisma.recognition.create({
+        data: {
+          organizationId: apdevRenewalTarget.id,
+          academicYear: AY_PREV,
+          kind: "INITIAL",
+          status: "RECOGNIZED",
+          submittedAt: new Date("2025-08-20T09:00:00+08:00"),
+          reviewedAt: new Date("2025-08-28T10:00:00+08:00"),
+          decidedAt: new Date("2025-09-05T14:00:00+08:00"),
+          decidedById: osas.id,
+          remarks: "Complete requirements. Granted full recognition.",
+        },
+      });
+      const events: EventInput[] = [
+        { recognitionId: rec.id, actorId: osas.id, action: "CREATED", toStatus: "DRAFT", createdAt: new Date("2025-08-15T08:00:00+08:00") },
+        { recognitionId: rec.id, actorId: osas.id, action: "SUBMITTED", fromStatus: "DRAFT", toStatus: "SUBMITTED", createdAt: new Date("2025-08-20T09:00:00+08:00") },
+        { recognitionId: rec.id, actorId: deanCcs.id, action: "STARTED_REVIEW", fromStatus: "SUBMITTED", toStatus: "UNDER_REVIEW", createdAt: new Date("2025-08-28T10:00:00+08:00") },
+        { recognitionId: rec.id, actorId: deanCcs.id, action: "ENDORSED", fromStatus: "UNDER_REVIEW", toStatus: "FOR_APPROVAL", note: "Requirements verified.", createdAt: new Date("2025-08-29T11:00:00+08:00") },
+        { recognitionId: rec.id, actorId: osas.id, action: "APPROVED", fromStatus: "FOR_APPROVAL", toStatus: "APPROVED", createdAt: new Date("2025-09-05T14:00:00+08:00") },
+        { recognitionId: rec.id, actorId: osas.id, action: "CONFERRED", fromStatus: "APPROVED", toStatus: "RECOGNIZED", createdAt: new Date("2025-09-06T09:00:00+08:00") },
+      ];
+      await prisma.recognitionEvent.createMany({ data: events });
+
+      // Carry-over fixtures: constitution, adviser commitment, certification.
+      const png = Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+        "base64",
+      );
+      const dir = path.join(process.cwd(), "storage", "uploads");
+      await mkdir(dir, { recursive: true });
+      for (const kind of ["CONSTITUTION", "ADVISER_COMMITMENT", "CERTIFICATION"]) {
+        const storedName = `${randomBytes(24).toString("hex")}.png`;
+        await writeFile(path.join(dir, storedName), png);
+        await prisma.attachment.create({
+          data: {
+            entityType: "Recognition",
+            entityId: rec.id,
+            fileName: `apdev-${kind.toLowerCase()}.png`,
+            storedName,
+            mimeType: "image/png",
+            sizeBytes: png.length,
+            kind: kind as never,
+            uploadedById: osas.id,
+          },
+        });
+        await prisma.auditLog.create({
+          data: {
+            userId: osas.id,
+            action: "ATTACHMENT_UPLOADED",
+            entityType: "Recognition",
+            entityId: rec.id,
+            entityLabel: `apdev-${kind.toLowerCase()}.png`,
+            newState: { mimeType: "image/png", sizeBytes: png.length, kind },
+            ipAddress: "127.0.0.1",
+          },
+        });
+      }
+      console.log("Seeded APDEV prior recognition (AY %s) + carry-over documents.", AY_PREV);
+    }
+  }
+
+  // ---------------------------------------------- Follow-ups (idempotent)
+  // Each in-flight recognition under review gets a follow-up record once
+  // submitted. Seed one outstanding follow-up on the ROBOTICS renewal so the
+  // OSAS dashboard / recognition page can demonstrate the pending follow-up.
+  const followUpTarget =
+    (await prisma.recognition.findFirst({
+      where: { organization: { acronym: "ROBOTICS" }, academicYear: AY_CUR },
+      select: { id: true, submittedAt: true },
+    })) ??
+    // Drift-tolerant fallback: DBs seeded before the ROBOTICS lifecycle (or
+    // re-seeded onto a partial current-AY set) may lack that row. Attach the
+    // demo follow-up to any current-AY recognition of a live organization so
+    // the OSAS follow-up surface stays demonstrable.
+    (await prisma.recognition.findFirst({
+      where: { academicYear: AY_CUR, organization: { status: "ACTIVE" } },
+      orderBy: { submittedAt: "desc" },
+      select: { id: true, submittedAt: true },
+    }));
+  if (followUpTarget) {
+    const existingFollowUp = await prisma.recognitionFollowUp.findFirst({
+      where: { recognitionId: followUpTarget.id },
+      select: { id: true },
+    });
+    if (!existingFollowUp) {
+      const expected = followUpTarget.submittedAt ?? new Date();
+      await prisma.recognitionFollowUp.create({
+        data: {
+          recognitionId: followUpTarget.id,
+          expectedDate: new Date(expected.getTime() + 7 * 86_400_000),
+          status: "PENDING",
+        },
+      });
+      console.log("Seeded a pending follow-up for ROBOTICS AY %s.", AY_CUR);
+    }
   }
 
   // ----------------------------------------------------------- Deadlines
@@ -652,7 +817,9 @@ async function main() {
           academicYear: AY_CUR,
         })
       );
-      const signers = [presidentAcs, secretaryJpia, adviserRegular, deanCcs];
+      // Six signatories now route through the office to OSAS (matches the
+      // printed "Noted: SOA / OSAS" approvers block on SF-001).
+      const signers = [presidentAcs, secretaryJpia, adviserRegular, deanCcs, soa, osas];
       let prevChainHash: string | null = null;
       const sfSteps = sfRoles.map((role, i) => {
         const signedAt = new Date(sfSignedAtBase.getTime() + i * 86_400_000);
@@ -972,6 +1139,22 @@ async function main() {
       },
     ],
   });
+
+  // Official form-template registry (SF-001..SF-006). Fixed institutional
+  // documents; a new OSAS release creates a new version row, never an edit.
+  for (const row of formTemplateSeedRows()) {
+    await prisma.formTemplate.upsert({
+      where: { formCode: row.formCode },
+      update: {
+        formName: row.formName,
+        templateVersion: row.templateVersion,
+        effectiveDate: row.effectiveDate,
+        status: row.status,
+        referenceFile: row.referenceFile,
+      },
+      create: row,
+    });
+  }
 
   console.log("Seed complete.");
   console.log("Demo accounts (password: Password123!):");

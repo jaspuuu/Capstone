@@ -1,5 +1,5 @@
-import { DonutChart, LineChart } from "@/components/ui/charts";
-import { KpiCard, NoData } from "@/components/analytics/analytics-parts";
+import { DonutChart } from "@/components/ui/charts";
+import { HBar, KpiCard, NoData } from "@/components/analytics/analytics-parts";
 import {
   activityPlannedTotal,
   activityStatusSlices,
@@ -17,7 +17,9 @@ export type AnalyticsKpiProps = {
   avgCompliance: number | null;
   compDelta: number | null;
   activeScoreCount: number;
-  compTrend: { label: string; value: number }[];
+  /** Most frequently missed SF-001 items — shown instead of a duplicate of the
+   *  full compliance-trend chart (that chart lives once, in the Trends view). */
+  topMissed: { label: string; value: number }[];
   finCounts: { SUBMITTED: number; OVERDUE: number; PENDING: number };
   monitored: OrgMonitoring[];
 };
@@ -48,11 +50,21 @@ export function AnalyticsKpis(p: AnalyticsKpiProps) {
         delta={p.compDelta}
         hint={`average of the 7-item SF-001 checklist across ${p.activeScoreCount} active organizations`}
       >
-        {p.compTrend.length > 0 ? (
-          <LineChart data={p.compTrend} ariaLabel="Average accreditation compliance per academic year" />
-        ) : (
-          <NoData what="Not enough completed records to compute a compliance trend for the selected period." />
-        )}
+        <div className="space-y-2.5">
+          {p.topMissed.length > 0 ? (
+            p.topMissed.map((m) => (
+              <HBar
+                key={m.label}
+                label={m.label}
+                tone="bg-warning"
+                percent={Math.round((m.value / Math.max(1, p.activeScoreCount)) * 100)}
+                rightText={`${m.value} orgs`}
+              />
+            ))
+          ) : (
+            <NoData what="All SF-001 checklist items are in hand across the active organizations in scope." />
+          )}
+        </div>
       </KpiCard>
       <KpiCard label="Financial compliance" value={`${p.finCounts.SUBMITTED}`} valueHint="submitted" hint="CAPS scope: submission status only">
         <DonutChart

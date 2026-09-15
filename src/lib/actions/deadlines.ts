@@ -86,9 +86,15 @@ export async function createDeadline(
     const audience = await officerAndAdviserIdsForOrgs(orgIds);
     await notifyUsers(audience, {
       type: "DEADLINE_NEW",
+      category: "DEADLINE",
+      priority: "ATTENTION",
       title: `New deadline: ${created.name}`,
       body: `Due ${due}${d.instructions ? ` — ${d.instructions.slice(0, 160)}` : ""}`,
       link: "/deadlines",
+      entityType: "Deadline",
+      entityId: created.id,
+      academicYear: created.academicYear,
+      reason: `This ${created.process.toLowerCase()} deadline applies to ${d.scopeType === "ALL" ? "your organization" : "the organizations you oversee"} for AY ${created.academicYear}.`,
     });
   } catch {
     // Never block deadline creation.
@@ -154,9 +160,15 @@ export async function updateDeadline(
       const audience = await officerAndAdviserIdsForOrgs(orgIds);
       await notifyUsers(audience, {
         type: "DEADLINE_UPDATED",
+        category: "DEADLINE",
+        priority: "ATTENTION",
         title: `Deadline updated: ${d.name}`,
         body: `Now due ${due}.`,
         link: "/deadlines",
+        entityType: "Deadline",
+        entityId: id,
+        academicYear: d.academicYear,
+        reason: `A ${d.process.toLowerCase()} deadline that applies to your organization was moved.`,
       });
     } catch {
       // Never block deadline updates.

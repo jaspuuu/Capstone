@@ -66,16 +66,16 @@ export function DrillActivities(p: DrillActivitiesProps) {
             <StatCard label="Budget utilized" value={`${budgetUtilizationPct(mon.budgetPlanned, mon.budgetActual) ?? 0}%`} icon={Wallet} iconTone="warning" />
             <StatCard label="Avg attendance" value={p.avgAttendance != null ? `${p.avgAttendance}%` : "—"} icon={Users} iconTone="info" />
           </div>
-          <ul className="space-y-2 text-sm text-content-secondary">
-            <li className="flex justify-between gap-2 rounded-lg border border-line px-3 py-2">
+          <ul className="divide-y divide-line text-sm text-content-secondary">
+            <li className="flex justify-between gap-2 py-2.5 first:pt-0">
               <span>Activities evaluated (ended)</span>
               <span className="font-semibold tabular-nums text-content">{mon.completed + mon.endedWithoutReport.length}</span>
             </li>
-            <li className="flex justify-between gap-2 rounded-lg border border-line px-3 py-2">
+            <li className="flex justify-between gap-2 py-2.5">
               <span>Ended without report</span>
               <span className="font-semibold tabular-nums text-content">{mon.endedWithoutReport.length}</span>
             </li>
-            <li className="flex justify-between gap-2 rounded-lg border border-line px-3 py-2">
+            <li className="flex justify-between gap-2 py-2.5 last:pb-0">
               <span>Pending follow-up</span>
               <span className="font-semibold tabular-nums text-content">{mon.upcoming.length}</span>
             </li>

@@ -1,0 +1,2 @@
+-- AlterEnum
+ALTER TYPE "AttachmentKind" ADD VALUE 'SUPPORTING_DOCUMENTS';

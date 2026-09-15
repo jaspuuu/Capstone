@@ -88,7 +88,7 @@ export type AnalyticsSnapshot = {
   allOrgs: AnalyticsOrg[];
   deadlines: DeadlineLite[];
   memberRows: { academicYear: string; _count: { _all: number } }[];
-  events: { recognitionId: string; action: string; createdAt: Date }[];
+  events: { recognitionId: string; action: string; note: string | null; createdAt: Date }[];
   currentSteps: { role: SignatoryRole }[];
   evaluations: {
     relevance: number;
@@ -286,7 +286,7 @@ export async function buildAnalyticsSnapshot(
       }),
       db.recognitionEvent.findMany({
         where: { recognition: { organizationId: { in: orgIds } } },
-        select: { recognitionId: true, action: true, createdAt: true },
+        select: { recognitionId: true, action: true, note: true, createdAt: true },
       }),
       db.signatureStep.findMany({
         where: { status: "CURRENT", route: { entityType: "SF" } },

@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
-  Activity as ActivityLine,
   Award,
   ArrowRight,
   CalendarClock,
@@ -16,10 +15,10 @@ import {
   RefreshCw,
   UserPlus,
   Users,
-  Wallet,
 } from "lucide-react";
 import { requireUser } from "@/lib/auth/guards";
 import { can, orgScopeWhere } from "@/lib/auth/rbac";
+import { canGovernOrganization, hasEffectiveMembership } from "@/lib/auth/positions";
 import { db } from "@/lib/db";
 import {
   ADVISER_TYPE_LABELS,
@@ -29,12 +28,15 @@ import {
   ORG_APPLICATION_STATUS_META,
   ORG_STATE_META,
   ORG_TYPE_LABELS,
+  PROPOSAL_STATUS_META,
   RECOGNITION_STATUS_META,
+  type BadgeTone,
 } from "@/lib/constants";
 import { deriveOrgState } from "@/lib/org-state";
 import { currentAcademicYear, formatDate, formatDateTime, fullName } from "@/lib/utils";import { Badge, Chip } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
+import { MyTasksCard } from "@/components/forms/my-tasks-card";
 import { Alert } from "@/components/ui/alert";
 import { Field, Select, Textarea } from "@/components/ui/form";
 import { WorkflowTracker } from "@/components/ui/workflow-tracker";
@@ -62,18 +64,33 @@ import {
   scheduleOrgInterview,
   recordOrgInterviewOutcome,
 } from "@/lib/actions/organizations";
+import { OrgWorkspaceNav, type OrgTabKey } from "@/components/org-workspace-nav";
+import { FORM_META } from "@/lib/form-routes";
 import { MemberPicker } from "@/app/(app)/organizations/[id]/member-picker";
 export const instant = false;
 
 export const metadata: Metadata = { title: "Organization profile" };
 
+const WORKSPACE_TABS = new Set<OrgTabKey>(["members", "recognition", "advisers"]);
+
+const ROUTE_STATE_BADGE: Record<string, { tone: BadgeTone; label: string }> = {
+  IN_PROGRESS: { tone: "warning", label: "In progress" },
+  COMPLETED: { tone: "success", label: "Completed" },
+  RETURNED_FOR_REVISION: { tone: "orange", label: "Revision required" },
+  REJECTED: { tone: "danger", label: "Rejected" },
+};
+
 export default async function OrganizationDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ tab?: string }>;
 }) {
   const user = await requireUser();
   const { id } = await params;
+  const sp = await searchParams;
+  const tab: OrgTabKey = sp.tab && WORKSPACE_TABS.has(sp.tab as OrgTabKey) ? (sp.tab as OrgTabKey) : "overview";
 
   // Scope check: the where clause guarantees users only reach their own orgs.
   const org = await db.organization.findFirst({
@@ -104,31 +121,31 @@ export default async function OrganizationDetailPage({
   const ay = currentAcademicYear();
   const state = deriveOrgState(org, org.recognitions);
   const canManage = can(user, "org.manage");
+  // §: plain members only see the organization's public-facing surface —
+  // overview, members, activities, and application status — never the
+  // internal process, forms, or matters.
+  const isMember = user.role === "MEMBER";
   const isEstablished = org.applicationStatus === "RECOGNIZED";
+  // Authority derives from the membership position, not the account role: an
+  // officer is whoever the organization assigned to an officer position this
+  // academic year with an effective (active/approved) membership (§account).
+  const currentMembers = org.members.filter((m) => m.academicYear === ay);
+  const myMembership = currentMembers.find((m) => m.userId === user.id);
   const isOfficer =
-    user.role === "PRESIDENT" || user.role === "SECRETARY"
-      ? org.members.some(
-          (m) =>
-            m.userId === user.id &&
-            m.academicYear === ay &&
-            (m.position === "PRESIDENT" || m.position === "SECRETARY")
-        )
-      : false;
+    canGovernOrganization(myMembership?.position) && hasEffectiveMembership(myMembership?.status);
   const canManageMembers = canManage || isOfficer;
 
   const currentAdvisers = org.advisers.filter((a) => a.academicYear === ay);
   const pastAdvisers = org.advisers
     .filter((a) => !a.isCurrent)
     .sort((x, y) => (y.endedAt?.getTime() ?? 0) - (x.endedAt?.getTime() ?? 0));
-  const currentMembers = org.members.filter((m) => m.academicYear === ay);
   // §8 profile facts: current senior adviser and President, shown in the header.
   const seniorAdviser = currentAdvisers.find((a) => a.type === "REGULAR" && a.isCurrent);
   const president = currentMembers.find(
     (m) => m.position === "PRESIDENT" && ["ACTIVE", "APPROVED"].includes(m.status)
   );
-  const appliedMembers = currentMembers.filter((m) => m.status === "APPLIED");
+  const appliedMembers = currentMembers.filter((m) => ["APPLIED", "UNDER_REVIEW"].includes(m.status));
   const approvedMembers = currentMembers.filter((m) => ["ACTIVE", "APPROVED"].includes(m.status));
-  const myMembership = currentMembers.find((m) => m.userId === user.id);
   const canApply =
     !myMembership &&
     ["MEMBER", "PRESIDENT", "SECRETARY"].includes(user.role) &&
@@ -172,6 +189,7 @@ export default async function OrganizationDetailPage({
     hasSecretary: currentMembers.some(
       (m) => m.position === "SECRETARY" && ["ACTIVE", "APPROVED"].includes(m.status)
     ),
+    activeMemberCount: currentMembers.filter((m) => ["ACTIVE", "APPROVED"].includes(m.status)).length,
   });
   const reqPct = orgAppCompliancePct(appRequirements);
   const reqGaps = orgAppSubmissionGaps(appRequirements);
@@ -203,6 +221,36 @@ export default async function OrganizationDetailPage({
         }),
       ])
     : [[], []];
+
+  // §: activity slate shown to plain members (their org's own activities).
+  const orgActivities = isMember
+    ? await db.activityProposal.findMany({
+        where: { organizationId: org.id, academicYear: ay },
+        select: { id: true, title: true, status: true, startAt: true },
+        orderBy: { startAt: "desc" },
+        take: 8,
+      })
+    : [];
+
+  // § Plan 2 overview D: next upcoming activities across roles.
+  const upcomingActivities = !isMember
+    ? await db.activityProposal.findMany({
+        where: { organizationId: org.id, academicYear: ay, startAt: { gte: new Date() } },
+        select: { id: true, title: true, status: true, startAt: true },
+        orderBy: { startAt: "asc" },
+        take: 3,
+      })
+    : [];
+
+  // § Plan 2 overview E: recently touched routed forms for this org + AY.
+  const recentRoutes = !isMember
+    ? await db.signatureRoute.findMany({
+        where: { entityType: "SF", entityId: { endsWith: `:${org.id}:${ay}` } },
+        select: { id: true, formKey: true, state: true, updatedAt: true },
+        orderBy: { updatedAt: "desc" },
+        take: 4,
+      })
+    : [];
 
   return (
     <>
@@ -251,6 +299,7 @@ export default async function OrganizationDetailPage({
           </p>
         </div>
 
+        {!isMember && (
         <div className="flex flex-wrap items-center gap-2">
           {isOfficer && isEstablished && !currentRec && (
             <Link
@@ -266,40 +315,12 @@ export default async function OrganizationDetailPage({
           )}
           {isOfficer && currentRec && ["DRAFT", "RETURNED"].includes(currentRec.status) && (
             <Link
-              href={`/recognition/${currentRec.id}`}
+              href={`/organizations/${org.id}/accreditation`}
               className="inline-flex h-10 items-center gap-2 rounded-lg bg-gold px-4 text-sm font-semibold text-primary-dark shadow-sm hover:bg-gold-dark hover:text-white"
             >
               Complete submission
             </Link>
           )}
-          <Link
-            href={`/organizations/${org.id}/documents`}
-            className="inline-flex h-10 items-center gap-2 rounded-lg border border-line-strong bg-surface px-4 text-sm font-semibold text-content hover:border-primary"
-          >
-            <FileStack className="size-4" aria-hidden />
-            Documents
-          </Link>
-          <Link
-            href={`/organizations/${org.id}/accreditation`}
-            className="inline-flex h-10 items-center gap-2 rounded-lg border border-line-strong bg-surface px-4 text-sm font-semibold text-content hover:border-primary"
-          >
-            <Award className="size-4" aria-hidden />
-            Accreditation
-          </Link>
-          <Link
-            href={`/organizations/${org.id}/monitoring`}
-            className="inline-flex h-10 items-center gap-2 rounded-lg border border-line-strong bg-surface px-4 text-sm font-semibold text-content hover:border-primary"
-          >
-            <ActivityLine className="size-4" aria-hidden />
-            Activity monitoring
-          </Link>
-          <Link
-            href={`/organizations/${org.id}/financial`}
-            className="inline-flex h-10 items-center gap-2 rounded-lg border border-line-strong bg-surface px-4 text-sm font-semibold text-content hover:border-primary"
-          >
-            <Wallet className="size-4" aria-hidden />
-            Financial
-          </Link>
           <a
             href={`/forms/sf-004?org=${org.id}`}
             target="_blank"
@@ -332,6 +353,7 @@ export default async function OrganizationDetailPage({
             </>
           )}
         </div>
+        )}
       </div>
 
       {/* §8 profile facts at a glance — recognition period, senior adviser, president */}
@@ -343,13 +365,19 @@ export default async function OrganizationDetailPage({
             </dt>
             <dd className="mt-1">
               {currentRec ? (
-                <Link
-                  href={`/recognition/${currentRec.id}`}
-                  className="inline-flex items-center gap-1.5 text-sm font-semibold text-content hover:text-primary"
-                >
-                  {RECOGNITION_STATUS_META[currentRec.status].label}
-                  <ArrowRight className="size-3.5 text-content-muted" aria-hidden />
-                </Link>
+                isMember ? (
+                  <span className="text-sm font-semibold text-content">
+                    {RECOGNITION_STATUS_META[currentRec.status].label}
+                  </span>
+                ) : (
+                  <Link
+                    href={`/organizations/${org.id}/accreditation`}
+                    className="inline-flex items-center gap-1.5 text-sm font-semibold text-content hover:text-primary"
+                  >
+                    {RECOGNITION_STATUS_META[currentRec.status].label}
+                    <ArrowRight className="size-3.5 text-content-muted" aria-hidden />
+                  </Link>
+                )
               ) : (
                 <span className="text-sm text-content-secondary">Not filed for AY {ay}</span>
               )}
@@ -382,13 +410,193 @@ export default async function OrganizationDetailPage({
         </div>
       </dl>
 
+      <OrgWorkspaceNav orgId={org.id} active={tab} member={isMember} />
+
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* Left column */}
         <div className="space-y-6 lg:col-span-2">
+          {/* §: My tasks — everything waiting on the signed-in user for this
+              organization (signatures, returned documents, open deadlines). */}
+          {tab === "overview" && !isMember && (
+            <MyTasksCard userId={user.id} role={user.role} collegeId={user.collegeId} orgId={org.id} />
+          )}
+
+          {/* Plan 2 overview B: compact recognition summary — the full
+              workflow lives under the Recognition tab. */}
+          {tab === "overview" && (
+            <Card>
+              <CardHeader
+                icon={Award}
+                title={`Recognition · AY ${ay}`}
+                description={
+                  isEstablished
+                    ? "This organization is currently recognized."
+                    : "Organization application progress for the current academic year."
+                }
+              />
+              <CardContent className="space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm text-content-secondary">
+                    {isEstablished ? "Recognition status" : "Application status"}
+                  </p>
+                  <Badge
+                    tone={
+                      currentRec
+                        ? RECOGNITION_STATUS_META[currentRec.status].tone
+                        : isEstablished
+                          ? "success"
+                          : "neutral"
+                    }
+                  >
+                    {currentRec
+                      ? RECOGNITION_STATUS_META[currentRec.status].label
+                      : isEstablished
+                        ? "Recognized"
+                        : `Not filed for AY ${ay}`}
+                  </Badge>
+                </div>
+                {!isEstablished && !isMember && (
+                  <>
+                    <div>
+                      <div className="mb-1 flex items-center justify-between text-xs font-semibold text-content-secondary">
+                        <span>Application requirements</span>
+                        <span>
+                          {appRequirements.filter((r) => r.met).length}/{appRequirements.length} · {reqPct}%
+                        </span>
+                      </div>
+                      <div className="h-1.5 overflow-hidden rounded-full bg-line">
+                        <div
+                          className="h-full rounded-full bg-primary transition-all"
+                          style={{ width: `${reqPct}%` }}
+                        />
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2 border-t border-line pt-3">
+                      <Link
+                        href={`/organizations/${org.id}?tab=recognition`}
+                        className="inline-flex h-9 items-center gap-2 rounded-lg bg-primary px-3.5 text-sm font-semibold text-white hover:bg-primary-hover"
+                      >
+                        Application & history
+                      </Link>
+                      <Link
+                        href={`/organizations/${org.id}/accreditation`}
+                        className="inline-flex h-9 items-center gap-2 rounded-lg border border-line-strong bg-surface px-3.5 text-sm font-semibold text-content hover:border-primary"
+                      >
+                        Documents & stages
+                      </Link>
+                    </div>
+                  </>
+                )}
+                {isEstablished && currentRec && !isMember && (
+                  <Link
+                    href={`/organizations/${org.id}/accreditation`}
+                    className="inline-flex h-9 items-center gap-2 rounded-lg border border-line-strong bg-surface px-3.5 text-sm font-semibold text-content hover:border-primary"
+                  >
+                    Recognition workspace <ArrowRight className="size-4" aria-hidden />
+                  </Link>
+                )}
+                {!isEstablished && isMember && (
+                  <p className="text-xs text-content-secondary">
+                    The officers complete the application requirements under the Recognition tab.
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Plan 2 overview D: next upcoming activities for this user's view. */}
+          {tab === "overview" && !isMember && (
+            <Card>
+              <CardHeader
+                icon={CalendarDays}
+                title="Upcoming activities"
+                description={`Next scheduled activities for AY ${ay}.`}
+              />
+              {upcomingActivities.length === 0 ? (
+                <EmptyState
+                  title="No upcoming activities"
+                  description={`This organization has not scheduled activities for AY ${ay}.`}
+                  className="border-0"
+                />
+              ) : (
+                <>
+                  <ul className="divide-y divide-line">
+                    {upcomingActivities.map((a) => (
+                      <li key={a.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-content">{a.title}</p>
+                          {a.startAt && <p className="text-xs text-content-secondary">{formatDate(a.startAt)}</p>}
+                        </div>
+                        <Badge tone={PROPOSAL_STATUS_META[a.status]?.tone ?? "neutral"}>
+                          {PROPOSAL_STATUS_META[a.status]?.label ?? a.status}
+                        </Badge>
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="border-t border-line px-5 py-3">
+                    <Link
+                      href={`/organizations/${org.id}/monitoring`}
+                      className="text-sm font-semibold text-primary hover:underline"
+                    >
+                      View activity monitoring <ArrowRight className="ml-0.5 inline size-3.5" aria-hidden />
+                    </Link>
+                  </div>
+                </>
+              )}
+            </Card>
+          )}
+
+          {/* Plan 2 overview E: recently touched documents (routed SF forms). */}
+          {tab === "overview" && !isMember && (
+            <Card>
+              <CardHeader
+                icon={FileStack}
+                title="Recent documents"
+                description={`Most recently updated official forms for AY ${ay}.`}
+              />
+              {recentRoutes.length === 0 ? (
+                <EmptyState
+                  title="No documents yet"
+                  description="Routed forms for this organization start to appear here once opened."
+                  className="border-0"
+                />
+              ) : (
+                <>
+                  <ul className="divide-y divide-line">
+                    {recentRoutes.map((r) => (
+                      <li key={r.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-content">
+                            {FORM_META[r.formKey as keyof typeof FORM_META]?.title ?? r.formKey}
+                          </p>
+                          <p className="text-xs text-content-secondary">
+                            {FORM_META[r.formKey as keyof typeof FORM_META]?.code ?? r.formKey} · updated{" "}
+                            {formatDate(r.updatedAt)}
+                          </p>
+                        </div>
+                        <Badge tone={ROUTE_STATE_BADGE[r.state]?.tone ?? "neutral"}>
+                          {ROUTE_STATE_BADGE[r.state]?.label ?? r.state}
+                        </Badge>
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="border-t border-line px-5 py-3">
+                    <Link
+                      href={`/organizations/${org.id}/documents`}
+                      className="text-sm font-semibold text-primary hover:underline"
+                    >
+                      Open document repository <ArrowRight className="ml-0.5 inline size-3.5" aria-hidden />
+                    </Link>
+                  </div>
+                </>
+              )}
+            </Card>
+          )}
+
           {/* §5: Organization application — created by the President, reviewed
               through the adviser → dean → SOA → OSAS chain before the
-              organization is recognized. */}
-          {!isEstablished && (
+              organization is recognized. (Plan 2: moved under the Recognition tab.) */}
+          {tab === "recognition" && !isEstablished && (
             <Card>
               <CardHeader
                 icon={ClipboardList}
@@ -396,9 +604,20 @@ export default async function OrganizationDetailPage({
                 description="Created and completed by the President, then processed through the official application flow — requirements, submission, interview, follow-up — before approval or disapproval."
               />
               <CardContent className="space-y-4">
-                <WorkflowTracker process="ORG_APPLICATION" status={org.applicationStatus} />
+                {isMember && (
+                  <p className="flex flex-wrap items-center gap-2 text-sm text-content-secondary">
+                    Status:{" "}
+                    <Badge tone={ORG_APPLICATION_STATUS_META[org.applicationStatus]?.tone ?? "neutral"}>
+                      {ORG_APPLICATION_STATUS_META[org.applicationStatus]?.label ?? org.applicationStatus}
+                    </Badge>
+                  </p>
+                )}
+                {!isMember && (
+                  <WorkflowTracker process="ORG_APPLICATION" status={org.applicationStatus} />
+                )}
 
                 {/* §official process: derived requirements checklist */}
+                {!isMember && (
                 <div className="rounded-lg border border-line bg-surface-secondary/60 p-3">
                   <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                     <p className="text-xs font-semibold uppercase tracking-wide text-content-secondary">
@@ -434,6 +653,7 @@ export default async function OrganizationDetailPage({
                     </p>
                   )}
                 </div>
+                )}
 
                 {org.applicationStatus === "RETURNED" || org.applicationStatus === "REJECTED" ? (
                   <Alert
@@ -450,7 +670,7 @@ export default async function OrganizationDetailPage({
                   </Alert>
                 ) : null}
 
-                {org.applicationStatus === "RETURNED" && (
+                {org.applicationStatus === "RETURNED" && !isMember && (
                   <div className="rounded-lg border border-warning/30 bg-warning-light/40 p-3">
                     <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-warning">
                       Follow-up required
@@ -606,7 +826,7 @@ export default async function OrganizationDetailPage({
           )}
 
           {/* §23 mirror: interview stage of the organization application */}
-          {!isEstablished && (canInterviewHere || org.interviewStatus !== "NOT_SCHEDULED") && (
+          {!isEstablished && !isMember && (canInterviewHere || org.interviewStatus !== "NOT_SCHEDULED") && (
             <Card>
               <CardHeader
                 icon={CalendarClock}
@@ -701,7 +921,29 @@ export default async function OrganizationDetailPage({
             </Card>
           )}
 
-          {org.description && (
+          {tab === "recognition" && isEstablished && !isMember && (
+            <Card>
+              <CardHeader
+                icon={Award}
+                title={`Recognition · AY ${ay}`}
+                description="This organization is already recognized."
+              />
+              <CardContent className="space-y-3">
+                <p className="text-sm text-content-secondary">
+                  The full recognition workspace — required documents, follow-ups, and stage history —
+                  lives in the accreditation module.
+                </p>
+                <Link
+                  href={`/organizations/${org.id}/accreditation`}
+                  className="inline-flex h-9 items-center gap-2 rounded-lg bg-primary px-3.5 text-sm font-semibold text-white hover:bg-primary-hover"
+                >
+                  Open recognition workspace <ArrowRight className="size-4" aria-hidden />
+                </Link>
+              </CardContent>
+            </Card>
+          )}
+
+          {org.description && tab === "overview" && (
             <Card>
               <CardHeader icon={Landmark} title="About" />
               <CardContent className="text-sm leading-relaxed whitespace-pre-wrap text-content-secondary">
@@ -710,7 +952,9 @@ export default async function OrganizationDetailPage({
             </Card>
           )}
 
-          {/* Advisers */}
+          {/* Advisers — internal faculty assignment, not shown to plain members.
+              (Plan 2: dedicated workspace tab.) */}
+          {tab === "advisers" && !isMember && (
           <Card>
             <CardHeader
               icon={GraduationCap}
@@ -821,8 +1065,10 @@ export default async function OrganizationDetailPage({
               )}
             </CardContent>
           </Card>
+          )}
 
-          {/* Members */}
+          {/* Members — Plan 2: dedicated workspace tab. */}
+          {tab === "members" && (
           <Card>
             <CardHeader
               icon={Users}
@@ -844,12 +1090,17 @@ export default async function OrganizationDetailPage({
                           <p className="truncate text-xs text-content-secondary">{m.user.email}</p>
                         </div>
                         <div className="flex shrink-0 items-center gap-2">
-                          <QuickActionForm
-                            action={reviewMembership}
-                            hidden={{ membershipId: m.id }}
-                            label="Review"
-                            variant="primary"
-                          />
+                          <Badge tone={MEMBERSHIP_STATUS_META[m.status]?.tone ?? "warning"}>
+                            {MEMBERSHIP_STATUS_META[m.status]?.label ?? m.status}
+                          </Badge>
+                          {m.status === "APPLIED" && (
+                            <QuickActionForm
+                              action={reviewMembership}
+                              hidden={{ membershipId: m.id }}
+                              label="Review"
+                              variant="primary"
+                            />
+                          )}
                           <QuickActionForm
                             action={decideMembership}
                             hidden={{ membershipId: m.id, decision: "APPROVED" }}
@@ -911,9 +1162,11 @@ export default async function OrganizationDetailPage({
                                 defaultValue={m.position}
                                 className="h-7 rounded-md border border-line-strong bg-surface px-1.5 text-xs"
                               >
-                                <option value="MEMBER">Member</option>
-                                <option value="PRESIDENT">President</option>
-                                <option value="SECRETARY">Secretary</option>
+                                {Object.entries(MEMBER_POSITION_LABELS).map(([value, label]) => (
+                                  <option key={value} value={value}>
+                                    {label}
+                                  </option>
+                                ))}
                               </select>
                               <button
                                 type="submit"
@@ -948,7 +1201,7 @@ export default async function OrganizationDetailPage({
 
               {/* Student self-service application (§14-§15): students keep one
                   account across organizations; each membership is per org-year. */}
-              {myMembership?.status === "APPLIED" && (
+              {myMembership && ["APPLIED", "UNDER_REVIEW"].includes(myMembership.status) && (
                 <p className="mt-4 rounded-lg bg-warning-light px-3 py-2 text-sm text-warning" role="status">
                   Your membership application is awaiting officer review.
                 </p>
@@ -1009,9 +1262,11 @@ export default async function OrganizationDetailPage({
                         </Field>
                         <Field label="Position" htmlFor="mem-pos">
                           <Select id="mem-pos" name="position" required defaultValue="MEMBER">
-                            <option value="MEMBER">Member</option>
-                            <option value="PRESIDENT">President</option>
-                            <option value="SECRETARY">Secretary</option>
+                            {Object.entries(MEMBER_POSITION_LABELS).map(([value, label]) => (
+                              <option key={value} value={value}>
+                                {label}
+                              </option>
+                            ))}
                           </Select>
                         </Field>
                       </ActionForm>
@@ -1021,8 +1276,43 @@ export default async function OrganizationDetailPage({
               )}
             </CardContent>
           </Card>
+          )}
 
-          {/* Recognition history */}
+          {/* §: Activities — members see the organization's own activity
+              slate, not the internal monitoring/reporting apparatus. */}
+          {tab === "overview" && isMember && (
+            <Card>
+              <CardHeader
+                icon={CalendarDays}
+                title={`Activities · AY ${ay}`}
+                description={`${orgActivities.length} ${orgActivities.length === 1 ? "activity" : "activities"} filed this academic year.`}
+              />
+              {orgActivities.length === 0 ? (
+                <EmptyState
+                  title="No activities yet"
+                  description="This organization has not filed any activities for AY {ay}."
+                  className="border-0"
+                />
+              ) : (
+                <ul className="divide-y divide-line">
+                  {orgActivities.map((a) => (
+                    <li key={a.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-content">{a.title}</p>
+                        {a.startAt && <p className="text-xs text-content-secondary">{formatDate(a.startAt)}</p>}
+                      </div>
+                      <Badge tone={PROPOSAL_STATUS_META[a.status]?.tone ?? "neutral"}>
+                        {PROPOSAL_STATUS_META[a.status]?.label ?? a.status}
+                      </Badge>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Card>
+          )}
+
+          {/* Recognition history — Plan 2: under the Recognition tab. */}
+          {tab === "recognition" && (
           <Card>
             <CardHeader
               icon={Award}
@@ -1040,12 +1330,16 @@ export default async function OrganizationDetailPage({
                 {org.recognitions.map((r) => (
                   <li key={r.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5">
                     <div>
-                      <Link
-                        href={`/recognition/${r.id}`}
-                        className="text-sm font-semibold text-primary hover:underline"
-                      >
-                        AY {r.academicYear}
-                      </Link>
+                      {isMember ? (
+                        <p className="text-sm font-semibold text-content">AY {r.academicYear}</p>
+                      ) : (
+                        <Link
+                          href={`/organizations/${org.id}/accreditation`}
+                          className="text-sm font-semibold text-primary hover:underline"
+                        >
+                          AY {r.academicYear}
+                        </Link>
+                      )}
                       <p className="text-xs text-content-secondary">
                         {r.kind === "RENEWAL" ? "Renewal" : "Initial application"}
                         {r.events[0] ? ` · last update ${formatDate(r.events[0].createdAt)}` : ""}
@@ -1059,6 +1353,7 @@ export default async function OrganizationDetailPage({
               </ul>
             )}
           </Card>
+          )}
         </div>
 
         {/* Right column */}

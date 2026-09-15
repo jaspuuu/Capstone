@@ -4,15 +4,14 @@ import { Pencil, Plus, Users } from "lucide-react";
 import { requirePermission } from "@/lib/auth/guards";
 import { getSessionUser } from "@/lib/auth/session";
 import { db } from "@/lib/db";
-import { SHORT_ROLE_LABELS } from "@/lib/constants";
+import { ACCOUNT_STATUS_META, SHORT_ROLE_LABELS } from "@/lib/constants";
 import { formatDateTime, fullName } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { TableWrap, THead, TH, TR, TD } from "@/components/ui/table";
-import { QuickActionForm } from "@/components/action-form";
-import { setUserActive } from "@/lib/actions/users";
+import { AccountStatusForm } from "@/components/account-status-form";
 export const instant = false;
 
 export const metadata: Metadata = { title: "User accounts" };
@@ -52,7 +51,7 @@ export default async function UsersPage({
     <>
       <PageHeader
         title="User accounts"
-        description="Create and manage system accounts. Roles determine permissions across the entire system."
+        description="Create and manage system accounts. Base roles set account type; officer authority comes from organization memberships."
         actions={
           <Link
             href="/users/new"
@@ -140,8 +139,8 @@ export default async function UsersPage({
                     {u.college?.code ?? "—"}
                   </TD>
                   <TD>
-                    <Badge tone={u.isActive ? "success" : "danger"} icon={!u.isActive}>
-                      {u.isActive ? "Active" : "Deactivated"}
+                    <Badge tone={ACCOUNT_STATUS_META[u.accountStatus].tone} icon={u.accountStatus !== "ACTIVE"}>
+                      {ACCOUNT_STATUS_META[u.accountStatus].label}
                     </Badge>
                   </TD>
                   <TD className="text-xs whitespace-nowrap text-content-secondary">
@@ -158,17 +157,7 @@ export default async function UsersPage({
                         Edit
                       </Link>
                       {u.id !== currentUser?.id && (
-                        <QuickActionForm
-                          action={setUserActive}
-                          hidden={{ id: u.id, isActive: String(!u.isActive) }}
-                          label={u.isActive ? "Deactivate" : "Activate"}
-                          variant="ghost"
-                          confirmMessage={
-                            u.isActive
-                              ? `Deactivate ${u.email}? Their active sessions will be signed out immediately.`
-                              : undefined
-                          }
-                        />
+                        <AccountStatusForm userId={u.id} email={u.email} current={u.accountStatus} />
                       )}
                     </div>
                   </TD>

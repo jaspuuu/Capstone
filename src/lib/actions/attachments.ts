@@ -22,11 +22,21 @@ import {
 
 export type ActionState = { error?: string; success?: string };
 
-const PARENT_PATHS: Record<string, (id: string) => string> = {
-  Recognition: (id) => `/recognition/${id}`,
+const OTHER_PARENT_PATHS: Record<string, (id: string) => string> = {
   ActivityProposal: (id) => `/activities/${id}`,
   AccomplishmentReport: (id) => `/reports/${id}`,
 };
+
+function parentRevalidatePath(entityType: string, entityId: string, organizationId: string): string {
+  if (entityType === "Recognition") return `/organizations/${organizationId}/accreditation`;
+  return OTHER_PARENT_PATHS[entityType]?.(entityId) ?? "/";
+}
+
+/** The requirement-scoped upload page, when the file is a tagged checklist doc. */
+function requirementRevalidatePath(organizationId: string, kind: string | null): string | null {
+  if (!kind) return null;
+  return `/organizations/${organizationId}/accreditation/requirements/${kind}`;
+}
 
 export async function uploadAttachment(
   _prev: ActionState,
@@ -71,6 +81,7 @@ export async function uploadAttachment(
   }
 
   const storedName = newStoredName(file.type);
+  const notes = String(formData.get("notes") ?? "").trim().slice(0, 500) || null;
   try {
     await saveAttachmentFile(storedName, bytes);
     await db.attachment.create({
@@ -78,6 +89,7 @@ export async function uploadAttachment(
         entityType,
         entityId,
         fileName: file.name.slice(0, 255),
+        notes,
         storedName,
         mimeType: file.type,
         sizeBytes: bytes.length,
@@ -99,9 +111,11 @@ export async function uploadAttachment(
     newState: { mimeType: file.type, sizeBytes: bytes.length, kind },
   });
 
-  revalidatePath(PARENT_PATHS[entityType](entityId));
+  revalidatePath(parentRevalidatePath(entityType, entityId, parent.organizationId));
   revalidatePath(`/organizations/${parent.organizationId}/documents`);
-  return { success: `Uploaded “${file.name}”.` };
+  const reqPath = requirementRevalidatePath(parent.organizationId, kind);
+  if (reqPath) revalidatePath(reqPath);
+  return { success: `Uploaded \u201c${file.name}\u201d.` };
 }
 
 export async function deleteAttachment(formData: FormData): Promise<void> {
@@ -128,11 +142,13 @@ export async function deleteAttachment(formData: FormData): Promise<void> {
     previousState: { storedName: attachment.storedName },
   });
 
-  revalidatePath(PARENT_PATHS[attachment.entityType](attachment.entityId));
+  revalidatePath(parentRevalidatePath(attachment.entityType, attachment.entityId, parent.organizationId));
   revalidatePath(`/organizations/${parent.organizationId}/documents`);
+  const reqPath = requirementRevalidatePath(parent.organizationId, attachment.kind);
+  if (reqPath) revalidatePath(reqPath);
 }
 
-/** Re-tag an existing file against one of the six SF-001 requirements. */
+/** Re-tag an existing file against one of the SF-001 requirements. */
 export async function updateAttachmentKind(formData: FormData): Promise<void> {
   const user = await requireUser();
   const id = String(formData.get("id") ?? "");
@@ -162,6 +178,8 @@ export async function updateAttachmentKind(formData: FormData): Promise<void> {
     newState: { kind: nextKind },
   });
 
-  revalidatePath(PARENT_PATHS[attachment.entityType](attachment.entityId));
+  revalidatePath(parentRevalidatePath(attachment.entityType, attachment.entityId, parent.organizationId));
   revalidatePath(`/organizations/${parent.organizationId}/documents`);
+  const reqPath = requirementRevalidatePath(parent.organizationId, nextKind);
+  if (reqPath) revalidatePath(reqPath);
 }
