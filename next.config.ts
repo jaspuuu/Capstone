@@ -5,6 +5,12 @@ const nextConfig: NextConfig = {
   // Components). The (app) layout reads cookies on every request, so all app
   // routes stay dynamic; PPR shells are therefore minimal.
   cacheComponents: true,
+  // The official OSAS master DOCX templates are read from disk at runtime
+  // (src/lib/docx/forms.ts). Ship them inside the export route's serverless
+  // bundle so DOCX generation works on deployed/hosted runtimes.
+  outputFileTracingIncludes: {
+    "/api/org/[id]/documents/[form]/export": ["./templates/osas/**"],
+  },
   // Allow LAN devices (phone/tablet) to open the dev server by IP.
   // DHCP reassigns addresses, so whitelist both known hosts of this network.
   allowedDevOrigins: ["192.168.1.2", "192.168.1.11"],
