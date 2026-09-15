@@ -2,12 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { Download, FileWarning } from "lucide-react";
+import { DocxPreview } from "@/components/forms/docx-preview";
 
 /**
- * Renders the populated PDF (fetched same-origin so the session cookie is sent)
- * and, when PDF rendering is unavailable or failed, shows a clean fallback that
- * keeps the authoritative DOCX download front and center. Never re-renders the
- * form as HTML.
+ * Renders the populated PDF when a server-side renderer (Microsoft Word) is
+ * available, or falls back to an in-browser DOCX preview so the document is
+ * always visible. The authoritative DOCX download is always shown.
  */
 export function PdfPreview({
   pdfHref,
@@ -18,7 +18,9 @@ export function PdfPreview({
   docxHref: string;
   label: string;
 }) {
-  const [state, setState] = useState<"loading" | "ready" | "errored">("loading");
+  const [state, setState] = useState<"loading" | "ready" | "errored" | "docx-fallback">(
+    "loading",
+  );
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [message, setMessage] = useState<string>("");
   const [retryKey, setRetryKey] = useState(0);
@@ -41,17 +43,16 @@ export function PdfPreview({
               | "word_unavailable"
               | "conversion_failed"
               | undefined;
-            setMessage(
-              hint === "word_busy"
-                ? "The official DOCX was generated successfully, but a Microsoft Word window is currently open, so the PDF could not be rendered. Close Word and press Retry."
-                : hint === "word_unavailable"
-                  ? "The official DOCX was generated successfully, but PDF preview needs Microsoft Word installed on this server. The official DOCX below remains available."
-                  : "The official DOCX was generated successfully, but PDF preview is currently unavailable on this server.",
-            );
-          } else {
-            setMessage("The document preview could not be rendered right now.");
+            if (hint === "word_busy") {
+              setMessage(
+                "The official DOCX was generated successfully, but a Microsoft Word window is currently open, so the PDF could not be rendered. Close Word and press Retry.",
+              );
+              setState("errored");
+              return;
+            }
           }
-          setState("errored");
+          // Server-side PDF unavailable (e.g. Linux/Vercel) — render in-browser.
+          setState("docx-fallback");
           return;
         }
         const blob = await res.blob();
@@ -64,7 +65,9 @@ export function PdfPreview({
         setState("ready");
       } catch {
         if (cancelled) return;
-        setMessage("The document preview could not be loaded. The official DOCX below remains available.");
+        setMessage(
+          "The document preview could not be loaded. The official DOCX below remains available.",
+        );
         setState("errored");
       }
     })();
@@ -75,11 +78,18 @@ export function PdfPreview({
     };
   }, [pdfHref, retryKey]);
 
+  if (state === "docx-fallback") {
+    return <DocxPreview docxHref={docxHref} label={label} />;
+  }
+
   return (
     <div>
       {state === "loading" && (
         <div className="flex h-[540px] flex-col items-center justify-center gap-2 bg-white text-sm text-content-muted">
-          <span className="size-5 animate-spin rounded-full border-2 border-content-muted border-t-transparent" aria-hidden />
+          <span
+            className="size-5 animate-spin rounded-full border-2 border-content-muted border-t-transparent"
+            aria-hidden
+          />
           Rendering the populated official document…
         </div>
       )}

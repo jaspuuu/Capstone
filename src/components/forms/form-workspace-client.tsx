@@ -314,9 +314,10 @@ export function FormWorkspaceClient({
         </div>
 
         <p className="mt-3 text-xs text-content-muted">
-          This preview renders the populated official DOCX via Microsoft Word so nothing in the
-          original layout, fonts, or spacing is altered. The downloaded DOCX is the official
-          document — review it in Office before submitting.
+          This preview renders the populated official document for on-screen review.
+          When a server-side renderer (Microsoft Word) is available, a PDF is shown;
+          otherwise the DOCX is rendered in your browser. The downloaded DOCX is the
+          official document — review it in Office before submitting.
         </p>
       </div>
     </main>

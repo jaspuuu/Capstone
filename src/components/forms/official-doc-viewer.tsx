@@ -10,9 +10,10 @@ import { PdfPreview } from "@/components/forms/pdf-preview";
  * Official OSAS document viewer (screen only — never prints a recreation).
  *
  * The populated DOCX generated from the master template is the official form.
- * This page shows the signature workflow and renders that DOCX to PDF with a
- * document-compatible renderer (Microsoft Word) for on-screen review; the
- * DOCX download remains the authoritative deliverable.
+ * This page shows the signature workflow and renders the document for on-screen
+ * review — via PDF when Microsoft Word is available on the server, otherwise as
+ * an in-browser DOCX preview. The DOCX download remains the authoritative
+ * deliverable.
  */
 export function OfficialDocViewer({
   formKey,
@@ -101,9 +102,10 @@ export function OfficialDocViewer({
         </section>
 
         <p className="mt-3 text-xs text-content-muted">
-          This preview renders the populated official DOCX via Microsoft Word so nothing in the
-          original layout, fonts, or spacing is altered. The downloaded DOCX is the official
-          document — review it in Office before submitting.
+          This preview renders the populated official document for on-screen review.
+          When a server-side renderer (Microsoft Word) is available, a PDF is shown;
+          otherwise the DOCX is rendered in your browser. The downloaded DOCX is the
+          official document — review it in Office before submitting.
         </p>
       </div>
     </main>
