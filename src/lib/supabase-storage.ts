@@ -30,26 +30,27 @@ function authHeaders(): Record<string, string> {
 }
 
 export async function ensureSupabaseStorageBucket(): Promise<void> {
-  const res = await fetch(`${storageBase()}/bucket/${SUPABASE_STORAGE_BUCKET}`, {
+  const listRes = await fetch(`${storageBase()}/bucket`, {
     headers: authHeaders(),
   });
-  if (res.ok) return;
-  if (res.status === 404) {
-    const create = await fetch(`${storageBase()}/bucket`, {
-      method: "POST",
-      headers: { ...authHeaders(), "Content-Type": "application/json" },
-      body: JSON.stringify({
-        id: SUPABASE_STORAGE_BUCKET,
-        name: SUPABASE_STORAGE_BUCKET,
-        public: false,
-      }),
-    });
-    if (!create.ok) {
-      throw new Error(`Supabase: unable to create bucket — ${create.status}`);
-    }
-    return;
+  if (!listRes.ok) {
+    throw new Error(`Supabase: unable to list buckets — ${listRes.status}`);
   }
-  throw new Error(`Supabase: unable to reach bucket — ${res.status}`);
+  const buckets = (await listRes.json()) as Array<{ id: string }>;
+  if (buckets.some((b) => b.id === SUPABASE_STORAGE_BUCKET)) return;
+
+  const create = await fetch(`${storageBase()}/bucket`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({
+      id: SUPABASE_STORAGE_BUCKET,
+      name: SUPABASE_STORAGE_BUCKET,
+      public: false,
+    }),
+  });
+  if (!create.ok) {
+    throw new Error(`Supabase: unable to create bucket — ${create.status}`);
+  }
 }
 
 export async function supabaseStoragePut(
